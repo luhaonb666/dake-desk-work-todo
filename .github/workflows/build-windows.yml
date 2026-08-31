@@ -24,7 +24,12 @@ jobs:
           pip install -r requirements.txt
 
       - name: Build application
-        run: pyinstaller --noconfirm --clean --windowed --onefile --name WorkTodo src/main.py
+        run: >
+          pyinstaller --noconfirm --clean --windowed --onefile --paths src
+          --hidden-import app_paths --hidden-import services.hotkey
+          --hidden-import storage.database --hidden-import ui.main_window
+          --hidden-import ui.task_dialog --hidden-import ui.float_window
+          --name WorkTodo src/main.py
 
       - name: Install Inno Setup
         run: choco install innosetup --yes --no-progress

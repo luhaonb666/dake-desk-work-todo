@@ -20,7 +20,14 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-pyinstaller --noconfirm --clean --windowed --onefile --name WorkTodo src\main.py
+pyinstaller --noconfirm --clean --windowed --onefile --paths src ^
+  --hidden-import app_paths ^
+  --hidden-import services.hotkey ^
+  --hidden-import storage.database ^
+  --hidden-import ui.main_window ^
+  --hidden-import ui.task_dialog ^
+  --hidden-import ui.float_window ^
+  --name WorkTodo src\main.py
 if errorlevel 1 (
   echo Program build failed. Please keep this window open and send the error text or screenshot.
   pause
