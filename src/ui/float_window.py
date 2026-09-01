@@ -33,25 +33,25 @@ class FloatBadge(QWidget):
         if ":" in self.value:
             hour, minute = self.value.split(":", 1)
             font = QFont(self.font())
-            font.setPixelSize(10)
+            font.setPixelSize(11)
             font.setWeight(QFont.Weight.DemiBold)
             painter.setFont(font)
             half = self.height() // 2
-            # Keep the time vertical and narrow. The minute is only three pixels
-            # to the right of the hour: the subtle hand-drawn stagger requested
-            # for the badge, without consuming title space.
+            # V2.3 keeps hour and minute on exactly the same vertical axis. Their
+            # two bounding rectangles meet at the centre so the lines sit closer
+            # together without losing the narrow badge footprint.
             painter.drawText(
-                QRect(0, 1, self.width() - 3, half - 2),
-                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
+                QRect(0, 1, self.width(), half - 1),
+                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
                 hour,
             )
             painter.drawText(
-                QRect(3, half + 1, self.width() - 3, self.height() - half - 2),
-                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
+                QRect(0, half, self.width(), self.height() - half - 1),
+                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
                 minute,
             )
             painter.setPen(QPen(self.color, 1))
-            painter.drawLine(7, half, 15, half)
+            painter.drawLine(9, half, 14, half)
         else:
             font = QFont(self.font())
             font.setPixelSize(13)
@@ -96,13 +96,14 @@ class FloatCard(QFrame):
         self._highlighted = highlighted
         self._pulse_on = False
         self._badge_text = badge
-        font_size = 11 if manual_break else 14
+        font_size = 11 if manual_break else 15
+        font_weight = 500 if manual_break else 600
         shown = text
         if not manual_break and len(text) > 12:
             shown = text[:11] + "…"
         self.text.setText(shown or "暂无固定内容")
         self.text.setStyleSheet(
-            f"border:none; background:transparent; color:#3e4854; font-size:{font_size}px; font-weight:500;"
+            f"border:none; background:transparent; color:#3e4854; font-size:{font_size}px; font-weight:{font_weight};"
         )
         self._apply_style()
 
@@ -138,7 +139,7 @@ class FloatWindow(QWidget):
 
     def __init__(self) -> None:
         super().__init__(None)
-        self.setWindowTitle("工作待办 V2.2.0 · 浮窗")
+        self.setWindowTitle("工作待办 V2.3.0 · 浮窗")
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(self.EXPANDED_WIDTH)

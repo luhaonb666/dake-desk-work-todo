@@ -24,10 +24,36 @@ from ui.theme import APP_STYLE
 class TitleEditor(QPlainTextEdit):
     next_field_requested = pyqtSignal()
 
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._normalizing_lines = False
+        self.textChanged.connect(self._keep_two_lines)
+
+    def _keep_two_lines(self) -> None:
+        if self._normalizing_lines:
+            return
+        text = self.toPlainText()
+        lines = text.split("\n")
+        if len(lines) <= 2:
+            return
+        # Keep pasted text instead of silently dropping it; only extra line
+        # breaks are flattened into the second title line.
+        normalized = lines[0] + "\n" + " ".join(part for part in lines[1:] if part)
+        position = min(self.textCursor().position(), len(normalized))
+        self._normalizing_lines = True
+        self.setPlainText(normalized)
+        cursor = self.textCursor()
+        cursor.setPosition(position)
+        self.setTextCursor(cursor)
+        self._normalizing_lines = False
+
     def keyPressEvent(self, event):  # noqa: N802
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             if event.modifiers() & (Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.AltModifier):
-                self.insertPlainText("\n")
+                if self.document().blockCount() < 2:
+                    self.insertPlainText("\n")
+                else:
+                    self.next_field_requested.emit()
             else:
                 self.next_field_requested.emit()
             event.accept()
@@ -49,7 +75,7 @@ class TaskDialog(QDialog):
         self.title_edit.setPlainText(task["title"] if task else "")
         self.title_edit.setPlaceholderText("例如：xxxx公司的技术方案")
         self.title_edit.setFixedHeight(76)
-        self.title_hint = QLabel("Enter 转到说明；Shift + Enter 或 Alt + Enter 在事项内换行；Ctrl + S 保存。")
+        self.title_hint = QLabel("标题最多2行；Enter 转到说明；Shift + Enter 或 Alt + Enter 换行；Ctrl + S 保存。")
         self.title_hint.setStyleSheet("font-size:11px; color:#9299a5;")
         title_box = QVBoxLayout()
         title_box.addWidget(self.title_edit)

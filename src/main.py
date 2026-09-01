@@ -1,4 +1,4 @@
-"""Work Todo V2.2.0 application entry point."""
+"""Work Todo V2.3.0 application entry point."""
 
 from __future__ import annotations
 

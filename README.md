@@ -1,6 +1,6 @@
 # Work Todo V2
 
-Windows 本地桌面待办工具，当前发布版本为 V2.2.0。数据保存在 Windows 的 `%LOCALAPPDATA%\WorkTodo`，不会随安装包升级被覆盖。
+Windows 本地桌面待办工具，当前发布版本为 V2.3.0。数据保存在 Windows 的 `%LOCALAPPDATA%\WorkTodo`，不会随安装包升级被覆盖。
 
 ## 当前交互
 

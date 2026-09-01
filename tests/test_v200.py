@@ -1,4 +1,4 @@
-"""Focused V2.2.0 regression checks for settings and reminder rules."""
+"""Focused V2.3.0 regression checks for settings and reminder rules."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import QApplication, QCheckBox, QLabel, QMessageBox
 
 from storage.database import Database
 from ui.main_window import MainWindow
-from ui.float_window import FloatWindow
+from ui.float_window import FloatCard, FloatWindow
 from ui.settings_dialog import GuidedTimeCombo, SettingsDialog
 from ui.task_dialog import TaskDialog
 
@@ -210,6 +210,32 @@ class V200Tests(unittest.TestCase):
         event = FakeWheel()
         dialog.countdown_count.wheelEvent(event)
         self.assertTrue(event.ignored)
+
+    def test_v230_title_is_limited_to_two_lines(self) -> None:
+        dialog = TaskDialog()
+        dialog.title_edit.setPlainText("第一行\n第二行\n第三行")
+        self.assertEqual(dialog.title_edit.document().blockCount(), 2)
+        self.assertEqual(dialog.title_edit.toPlainText(), "第一行\n第二行 第三行")
+
+    def test_v230_water_slots_align_and_greeting_shows_two_lines(self) -> None:
+        dialog = SettingsDialog(self.db, list(MainWindow.DEFAULT_GREETINGS))
+        dialog.greeting.setCurrentIndex(1)
+        dialog.show()
+        self.app.processEvents()
+        controls = [*dialog.water_fixed_buttons, *dialog.water_custom]
+        self.assertEqual({(control.width(), control.height()) for control in controls}, {(68, 34)})
+        positions = {control.mapTo(dialog, control.rect().topLeft()).y() for control in controls}
+        self.assertEqual(len(positions), 1)
+        self.assertEqual(dialog.width(), 620)
+        self.assertGreaterEqual(dialog.greeting.height(), 48)
+        self.assertIn("\n", dialog.greeting.currentText())
+
+    def test_v230_single_line_float_card_is_larger_and_bolder(self) -> None:
+        card = FloatCard()
+        card.update_card("15:00", "做报价", kind="countdown")
+        style = card.text.styleSheet()
+        self.assertIn("font-size:15px", style)
+        self.assertIn("font-weight:600", style)
 
 
 if __name__ == "__main__":

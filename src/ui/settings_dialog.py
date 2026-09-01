@@ -20,6 +20,9 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QStyle,
+    QStyleOptionComboBox,
+    QStylePainter,
     QVBoxLayout,
     QWidget,
     QWidgetAction,
@@ -125,6 +128,36 @@ class GuidedTimeCombo(QPushButton):
         menu.exec(self.mapToGlobal(self.rect().bottomLeft()))
 
 
+class MultilineComboBox(NoWheelComboBox):
+    """A compact combo whose selected encouragement can visibly use two lines."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setMinimumHeight(48)
+        self.setMinimumWidth(210)
+        self.setSizeAdjustPolicy(self.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.setMinimumContentsLength(12)
+
+    def paintEvent(self, event):  # noqa: N802
+        option = QStyleOptionComboBox()
+        self.initStyleOption(option)
+        text = option.currentText
+        option.currentText = ""
+        painter = QStylePainter(self)
+        painter.drawComplexControl(QStyle.ComplexControl.CC_ComboBox, option)
+        edit_rect = self.style().subControlRect(
+            QStyle.ComplexControl.CC_ComboBox,
+            option,
+            QStyle.SubControl.SC_ComboBoxEditField,
+            self,
+        ).adjusted(4, 2, -2, -2)
+        painter.drawText(
+            edit_rect,
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap),
+            text,
+        )
+
+
 class AutoHeightTextEdit(QPlainTextEdit):
     """Small multiline editor that grows as intentional line breaks are added."""
 
@@ -166,14 +199,15 @@ class SettingsDialog(QDialog):
     OFFWORK_CHOICES = (5, 10, 15, 20, 30)
     FIXED_WATER_TIMES = ("10:15", "15:15")
     MEAL_TIMES = ("11:59", "17:59")
+    WATER_SLOT_SIZE = (68, 34)
 
     def __init__(self, db, greetings: list[str], parent=None) -> None:
         super().__init__(parent)
         self.db = db
         self.setObjectName("settingsDialog")
         self.setWindowTitle("设置")
-        self.resize(720, 720)
-        self.setMinimumSize(680, 580)
+        self.resize(620, 720)
+        self.setMinimumSize(600, 580)
         self.setStyleSheet(SETTINGS_STYLE)
 
         root = QVBoxLayout(self)
@@ -238,6 +272,22 @@ class SettingsDialog(QDialog):
         button.setChecked(checked)
         return button
 
+    def _water_slot_column(self, widget: QWidget, egg_text: str = "") -> QWidget:
+        width, height = self.WATER_SLOT_SIZE
+        widget.setFixedSize(width, height)
+        column = QWidget()
+        column.setFixedWidth(width)
+        column_layout = QVBoxLayout(column)
+        column_layout.setContentsMargins(0, 0, 0, 0)
+        column_layout.setSpacing(1)
+        egg = QLabel(egg_text or " ")
+        egg.setObjectName("easterEgg")
+        egg.setFixedHeight(11)
+        egg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        column_layout.addWidget(egg)
+        column_layout.addWidget(widget)
+        return column
+
     def _build_work_section(self) -> None:
         section = SettingsSection("工作与启动")
         self.end_time = NoWheelTimeEdit()
@@ -261,25 +311,16 @@ class SettingsDialog(QDialog):
         self.water_fixed_buttons = []
         fixed_water = []
         for value in self.FIXED_WATER_TIMES:
-            column = QWidget()
-            column_layout = QVBoxLayout(column)
-            column_layout.setContentsMargins(0, 0, 0, 0)
-            column_layout.setSpacing(1)
-            egg = QLabel("饮茶时间！" if value == "15:15" else " ")
-            egg.setObjectName("easterEgg")
-            egg.setAlignment(Qt.AlignmentFlag.AlignCenter)
             button = self._choice(value, value in selected_fixed)
-            button.setMinimumWidth(56)
             self.water_fixed_buttons.append(button)
-            column_layout.addWidget(egg)
-            column_layout.addWidget(button)
-            fixed_water.append(column)
+            fixed_water.append(self._water_slot_column(button, "饮茶时间！" if value == "15:15" else ""))
         custom_values = self._load_json_list(self.db.get_setting("water_custom_times", ""), ["", "", ""])
         custom_values = (custom_values + ["", "", ""])[:3]
         self.water_custom = [GuidedTimeCombo(value) for value in custom_values]
         for combo in self.water_custom:
             combo.valueChanged.connect(lambda _, changed=combo: self._prevent_duplicate_water(changed))
-        water_row = self._row(self.water_enabled, *fixed_water, *self.water_custom)
+        custom_water = [self._water_slot_column(combo) for combo in self.water_custom]
+        water_row = self._row(self.water_enabled, *fixed_water, *custom_water)
         section.add_row(water_row)
 
         self.meal_enabled = QCheckBox("吃饭提醒")
@@ -319,7 +360,7 @@ class SettingsDialog(QDialog):
 
     def _build_greeting_section(self, greetings: list[str]) -> None:
         section = SettingsSection("顶部鼓励语")
-        self.greeting = NoWheelComboBox()
+        self.greeting = MultilineComboBox()
         self.greeting.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.greeting.addItems(greetings)
         saved = self.db.get_setting("float_greeting", greetings[0] if greetings else "")
@@ -327,12 +368,15 @@ class SettingsDialog(QDialog):
         self.greeting.setCurrentIndex(index if index >= 0 else (0 if greetings else -1))
         self.delete_greeting = QPushButton("删除当前鼓励语")
         self.delete_greeting.setObjectName("dangerButton")
+        self.delete_greeting.setFixedWidth(110)
         self.delete_greeting.clicked.connect(self._remove_greeting)
         section.add_row(self._row(self._row_label("当前鼓励语"), self.greeting, self.delete_greeting, stretch=False))
 
         self.custom_greeting = AutoHeightTextEdit()
+        self.custom_greeting.setMinimumWidth(210)
         self.custom_greeting.setPlaceholderText("可以输入多行鼓励语，换行会原样显示在浮窗中")
         self.save_greeting = QPushButton("保存为新鼓励语")
+        self.save_greeting.setFixedWidth(110)
         self.save_greeting.clicked.connect(self._save_custom_greeting)
         section.add_row(self._row(self._row_label("自定义鼓励语"), self.custom_greeting, self.save_greeting, stretch=False), divider=True)
         self.sections.addWidget(section)

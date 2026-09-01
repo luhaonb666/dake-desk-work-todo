@@ -24,7 +24,7 @@ from ui.task_dialog import TaskDialog
 from ui.theme import APP_STYLE, TASK_CARD_COLORS
 
 
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.3.0"
 
 
 def app_icon() -> QIcon:
@@ -59,6 +59,8 @@ class TaskCard(QFrame):
         check.toggled.connect(lambda checked: on_complete(task["id"], checked))
         layout.addWidget(check, 0, Qt.AlignmentFlag.AlignTop)
         content = QVBoxLayout()
+        content.setContentsMargins(0, 0, 0, 0)
+        content.setSpacing(2)
         heading = f"{task['due_time']}  {task['title']}" if task["due_time"] else task["title"]
         title = QLabel(heading)
         title.setWordWrap(True)
@@ -70,7 +72,7 @@ class TaskCard(QFrame):
         if task["notes"]:
             notes = QLabel(task["notes"])
             notes.setWordWrap(True)
-            notes.setStyleSheet("font-size:12px; color:#718096; margin-top:2px;")
+            notes.setStyleSheet("font-size:12px; color:#718096;")
             content.addWidget(notes)
         if overdue:
             warning = QLabel("已超时")
@@ -243,7 +245,7 @@ class MainWindow(QMainWindow):
         self.list_host = QWidget()
         self.list_layout = QVBoxLayout(self.list_host)
         self.list_layout.setContentsMargins(0, 4, 0, 4)
-        self.list_layout.setSpacing(6)
+        self.list_layout.setSpacing(5)
         self.list_layout.addStretch()
         self.scroll.setWidget(self.list_host)
         outer.addWidget(self.scroll, 1)
@@ -377,7 +379,9 @@ class MainWindow(QMainWindow):
             empty.setStyleSheet("color:#87909c; padding:28px 6px;")
             self.list_layout.addWidget(empty)
         if fixed:
-            self.list_layout.addWidget(self.section_label("固定待办", 0))
+            fixed_label = self.section_label("固定待办", 0)
+            fixed_label.setFixedHeight(16)
+            self.list_layout.addWidget(fixed_label)
             for task in fixed:
                 self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task))
         if self.tabs.currentIndex() == 0:
