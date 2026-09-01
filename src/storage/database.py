@@ -162,6 +162,16 @@ class Database:
         sql += " ORDER BY is_fixed ASC, due_time IS NULL ASC, due_time ASC, created_at ASC"
         return list(self.connection.execute(sql, args).fetchall())
 
+    def all_pending_tasks(self) -> list[sqlite3.Row]:
+        """Return every unfinished task in calendar order for the scrollable view."""
+        return list(
+            self.connection.execute(
+                """SELECT * FROM tasks
+                   WHERE is_completed = 0 AND deleted_at IS NULL
+                   ORDER BY task_date ASC, is_fixed ASC, due_time IS NULL ASC, due_time ASC, created_at ASC"""
+            ).fetchall()
+        )
+
     def float_tasks(self) -> list[sqlite3.Row]:
         return list(
             self.connection.execute(

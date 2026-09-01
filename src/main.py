@@ -7,7 +7,6 @@ import logging
 import sys
 import traceback
 
-from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from app_paths import configure_logging
@@ -38,6 +37,7 @@ def main() -> int:
     window = MainWindow()
     hotkey = GlobalHotkey(window.show_editor)
     app.installNativeEventFilter(hotkey)
+    window.set_hotkey_manager(hotkey)
     shortcut = window.db.get_setting("float_shortcut", "none")
     if shortcut != "none" and not hotkey.register(shortcut):
         logging.warning("Configured global shortcut was not available")
@@ -45,9 +45,6 @@ def main() -> int:
         window.hide()
     else:
         window.show_editor()
-    if not window.db.get_setting("configured", "") and not args.background:
-        QTimer.singleShot(250, window.open_settings)
-        window.db.set_setting("configured", "1")
     exit_code = app.exec()
     hotkey.unregister()
     return exit_code
