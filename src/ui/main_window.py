@@ -3,27 +3,32 @@
 from __future__ import annotations
 
 import logging
+import json
 import sys
 from datetime import datetime, timedelta
 
-from PyQt6.QtCore import QDateTime, QTime, QTimer, Qt
+from PyQt6.QtCore import QTime, QTimer, Qt
 from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMenu,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSystemTrayIcon,
     QTabBar,
     QTimeEdit,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -50,7 +55,7 @@ def app_icon() -> QIcon:
 
 
 class TaskCard(QFrame):
-    def __init__(self, task, on_complete, on_edit, on_float, parent=None) -> None:
+    def __init__(self, task, on_complete, on_edit, on_float, on_delete, parent=None) -> None:
         super().__init__(parent)
         self.task = task
         self.setObjectName("taskCard")
@@ -108,6 +113,10 @@ class TaskCard(QFrame):
         floating.setObjectName("quietButton")
         floating.clicked.connect(lambda: on_float(task))
         layout.addWidget(floating, 0, Qt.AlignmentFlag.AlignTop)
+        delete = QPushButton("删除")
+        delete.setObjectName("quietButton")
+        delete.clicked.connect(lambda: on_delete(task))
+        layout.addWidget(delete, 0, Qt.AlignmentFlag.AlignTop)
 
 
 class MainWindow(QMainWindow):
@@ -115,12 +124,19 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.db = Database(app_data_dir() / "work-todo.db")
         self.db.ensure_settings_table()
-        self.setWindowTitle("工作待办")
+        self.setWindowTitle("工作待办 V1.1")
         self.setWindowIcon(app_icon())
         self.resize(760, 760)
         self.setMinimumSize(570, 520)
         self.float_window = FloatWindow()
         self.float_window.open_requested.connect(self.show_editor)
+        self.float_window.collapsed_after_alert.connect(self.finish_float_alert)
+        self.float_window.position_changed.connect(self.save_float_position)
+        saved_float_y = self.db.get_setting("float_dock_y", "")
+        if saved_float_y.isdigit():
+            self.float_window.set_dock_y(int(saved_float_y))
+        self.alert_task_ids: set[int] = set()
+        self.hotkey_manager = None
         self._build_ui()
         self._build_tray()
         self.set_autostart(self.db.get_setting("autostart", "1") == "1")
@@ -128,6 +144,7 @@ class MainWindow(QMainWindow):
         self.reminder_timer.timeout.connect(self.check_reminders)
         self.reminder_timer.start(30_000)
         self.render()
+        QTimer.singleShot(1_000, self.check_reminders)
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -138,7 +155,7 @@ class MainWindow(QMainWindow):
         outer.setSpacing(12)
         header = QHBoxLayout()
         title_box = QVBoxLayout()
-        title = QLabel("工作待办")
+        title = QLabel("工作待办 V1.1")
         title.setStyleSheet("font-size:26px; font-weight:700; color:#1f2937;")
         self.subtitle = QLabel()
         self.subtitle.setStyleSheet("font-size:13px; color:#7a8491;")
@@ -183,11 +200,11 @@ class MainWindow(QMainWindow):
         outer.addWidget(self.scroll, 1)
         self.setStyleSheet(
             """
-            QWidget#root { background:#f7f8fa; }
-            QPushButton { background:#ffffff; border:1px solid #dde3ea; border-radius:9px; padding:7px 11px; color:#3c4654; }
-            QPushButton:hover { background:#f1f5ff; }
-            QPushButton#primaryButton { background:#4f7cff; color:white; border:none; font-weight:600; }
-            QPushButton#primaryButton:hover { background:#3f6cf0; }
+            QWidget#root { background:#fbf9ff; }
+            QPushButton { background:#ffffff; border:1px solid #e6dfef; border-radius:12px; padding:7px 11px; color:#514c61; }
+            QPushButton:hover { background:#f4efff; }
+            QPushButton#primaryButton { background:#9f86d9; color:white; border:none; font-weight:600; }
+            QPushButton#primaryButton:hover { background:#8b70cb; }
             QPushButton#quietButton { border:none; background:transparent; color:#718096; padding:3px 5px; font-size:12px; }
             QTabBar::tab { background:transparent; color:#77808c; padding:8px 13px; border-bottom:2px solid transparent; }
             QTabBar::tab:selected { color:#315fc9; border-bottom:2px solid #4f7cff; font-weight:600; }
@@ -234,7 +251,7 @@ class MainWindow(QMainWindow):
         if normal:
             self.list_layout.addWidget(self.section_label("今日事项"))
             for task in normal:
-                self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu))
+                self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task))
         else:
             empty = QLabel("今天还没有事项。点击右上角“添加事项”开始安排。")
             empty.setStyleSheet("color:#87909c; padding:28px 6px;")
@@ -242,7 +259,7 @@ class MainWindow(QMainWindow):
         if fixed:
             self.list_layout.addWidget(self.section_label("固定待办"))
             for task in fixed:
-                self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu))
+                self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task))
         if not pending_only:
             tomorrow = (datetime.now() + timedelta(days=1)).date().isoformat()
             tomorrow_tasks = self.db.tasks_for(tomorrow)
@@ -251,7 +268,7 @@ class MainWindow(QMainWindow):
             if preview_normal or preview_fixed:
                 self.list_layout.addWidget(self.section_label("明日预览（继续向下滚动查看）"))
                 for task in [*preview_normal, *preview_fixed]:
-                    preview = TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu)
+                    preview = TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task)
                     preview.setWindowOpacity(0.78)
                     self.list_layout.addWidget(preview)
         self.list_layout.addStretch(1)
@@ -274,10 +291,20 @@ class MainWindow(QMainWindow):
         self.db.set_completed(task_id, completed)
         self.render()
 
+    def delete_task(self, task) -> None:
+        answer = QMessageBox.question(self, "删除事项", "确定删除这条事项吗？")
+        if answer == QMessageBox.StandardButton.Yes:
+            self.db.delete_task(task["id"])
+            self.render()
+
     def open_float_menu(self, task) -> None:
         menu = QMenu(self)
-        for slot in range(4, 7):
-            action = QAction(f"放入浮窗自定义位 {slot}", self)
+        manual_count = int(self.db.get_setting("manual_float_count", "3"))
+        occupied = {item["float_slot"]: item for item in self.db.float_tasks()}
+        for slot in range(1, manual_count + 1):
+            other = occupied.get(slot)
+            suffix = f"（替换：{other['title']}）" if other and other["id"] != task["id"] else ""
+            action = QAction(f"放入浮窗位置 {slot}{suffix}", self)
             action.triggered.connect(lambda _, number=slot: self.assign_float_task(task["id"], number))
             menu.addAction(action)
         remove = QAction("从浮窗移除", self)
@@ -286,13 +313,28 @@ class MainWindow(QMainWindow):
         menu.exec(self.cursor().pos())
 
     def assign_float_task(self, task_id: int, slot: int) -> None:
+        occupied = next((item for item in self.db.float_tasks() if item["float_slot"] == slot and item["id"] != task_id), None)
+        if occupied:
+            answer = QMessageBox.question(self, "替换浮窗内容", f"位置 {slot} 当前是“{occupied['title']}”。确定替换吗？")
+            if answer != QMessageBox.StandardButton.Yes:
+                return
         self.db.clear_float_slot(slot)
         self.db.update_task(task_id, float_slot=slot)
         self.refresh_float()
 
-    def refresh_float(self) -> None:
+    def refresh_float(
+        self,
+        countdown_count: int | None = None,
+        manual_count: int | None = None,
+    ) -> None:
         today = self.db.today()
         now = datetime.now()
+        if countdown_count is None:
+            countdown_count = int(self.db.get_setting("countdown_float_count", "3"))
+        if manual_count is None:
+            manual_count = int(self.db.get_setting("manual_float_count", "3"))
+        greeting = self.db.get_setting("float_greeting", "工作辛苦，也要保持开心鸭！")
+        self.float_window.configure(greeting, countdown_count, manual_count)
         scheduled = [
             task
             for task in self.db.tasks_for(today, pending_only=True)
@@ -303,29 +345,41 @@ class MainWindow(QMainWindow):
         for task in scheduled:
             due = datetime.strptime(f"{today} {task['due_time']}", "%Y-%m-%d %H:%M")
             (past if due <= now else future).append((due, task))
-        # Most recently overdue comes first; remaining slots show the nearest future work.
-        urgent = [task for _, task in sorted(past, key=lambda pair: pair[0], reverse=True)] + [
-            task for _, task in sorted(future, key=lambda pair: pair[0])
-        ]
-        urgent = urgent[:3]
-        texts = [f"{task['due_time']}  {task['title']}" for task in urgent]
-        texts.extend([""] * (3 - len(texts)))
+        # Overdue tasks remain only while their due-time alert is expanded.
+        urgent = [task for _, task in sorted(past, key=lambda pair: pair[0], reverse=True) if task["id"] in self.alert_task_ids]
+        urgent.extend(task for _, task in sorted(future, key=lambda pair: pair[0]))
+        urgent = urgent[:countdown_count]
+        countdown = [(task["due_time"], task["title"], task["id"]) for task in urgent]
+        countdown.extend([("", "", -1)] * (countdown_count - len(countdown)))
         custom = {task["float_slot"]: task for task in self.db.float_tasks()}
-        for slot in range(4, 7):
+        manual = []
+        for slot in range(1, manual_count + 1):
             task = custom.get(slot)
             text = task["title"] if task else self.db.get_setting(f"float_text_{slot}", "")
-            texts.append(text)
-        self.float_window.set_items(texts)
+            manual.append((str(slot), text))
+        self.float_window.set_items(countdown, manual, self.alert_task_ids)
 
     def toggle_float(self) -> None:
         if self.float_window.isVisible():
             self.float_window.hide()
             self.float_button.setText("显示桌面浮窗")
         else:
-            screen = QApplication.primaryScreen().availableGeometry()
-            self.float_window.move(screen.right() - self.float_window.width() - 22, screen.bottom() - 390)
+            self.float_window.dock_to_right()
             self.float_window.show()
+            self.float_window.expand()
             self.float_button.setText("隐藏桌面浮窗")
+
+    def save_float_position(self, y: int) -> None:
+        """Remember the vertical placement while preserving the right-edge peek animation."""
+        self.db.set_setting("float_dock_y", str(y))
+
+    def set_hotkey_manager(self, manager) -> None:
+        self.hotkey_manager = manager
+
+    def apply_shortcut(self, shortcut: str) -> bool:
+        if self.hotkey_manager is None:
+            return shortcut == "none"
+        return self.hotkey_manager.register(shortcut)
 
     def show_editor(self) -> None:
         if self.isMinimized():
@@ -345,16 +399,24 @@ class MainWindow(QMainWindow):
 
     def check_reminders(self) -> None:
         now = datetime.now()
-        self.refresh_float()
+        alert_ids: set[int] = set()
         for task in self.db.tasks_needing_reminder(self.db.today()):
             due = datetime.strptime(f"{task['task_date']} {task['due_time']}", "%Y-%m-%d %H:%M")
             seconds = (due - now).total_seconds()
-            if 0 < seconds <= 600:
-                if self.isVisible():
-                    self.show_notice(f"提醒：{task['title']} 将在 10 分钟内到期")
-                    self.db.mark_reminded(task["id"])
-            elif seconds <= 0:
-                self.render()
+            if 0 < seconds <= 600 and not task["pre_alerted_at"]:
+                self.db.mark_alerted(task["id"], "pre")
+                alert_ids.add(task["id"])
+            elif seconds <= 0 and not task["due_alerted_at"]:
+                self.db.mark_alerted(task["id"], "due")
+                alert_ids.add(task["id"])
+        if alert_ids:
+            self.alert_task_ids.update(alert_ids)
+            self.refresh_float()
+            self.float_window.show_alert()
+            if self.isVisible():
+                self.show_notice("提醒事项已在桌面浮窗高亮显示")
+        else:
+            self.refresh_float()
         end_time = self.db.get_setting("off_work_time", "18:00")
         try:
             end = datetime.strptime(f"{self.db.today()} {end_time}", "%Y-%m-%d %H:%M")
@@ -365,36 +427,87 @@ class MainWindow(QMainWindow):
         except ValueError:
             logging.warning("Invalid off-work time setting: %s", end_time)
 
+    def finish_float_alert(self) -> None:
+        """Only after the alert panel folds away do due tasks leave its countdown area."""
+        self.alert_task_ids.clear()
+        self.refresh_float()
+        self.render()
+
     def open_settings(self) -> None:
         dialog = QDialog(self)
         dialog.setWindowTitle("设置")
+        dialog.setMinimumWidth(500)
         form = QFormLayout(dialog)
         end_time = QTimeEdit()
         end_time.setDisplayFormat("HH:mm")
         end_time.setTime(QTime.fromString(self.db.get_setting("off_work_time", "18:00"), "HH:mm"))
         autostart = QCheckBox("开机后在后台启动")
         autostart.setChecked(self.db.get_setting("autostart", "1") == "1")
+        countdown_count = QSpinBox()
+        countdown_count.setRange(3, 5)
+        countdown_count.setValue(int(self.db.get_setting("countdown_float_count", "3")))
+        manual_count = QSpinBox()
+        manual_count.setRange(0, 4)
+        manual_count.setValue(int(self.db.get_setting("manual_float_count", "3")))
+        shortcut = QComboBox()
+        shortcut.addItem("无快捷键", "none")
+        shortcut.addItem("Alt + E（建议）", "alt+e")
+        shortcut.setCurrentIndex(1 if self.db.get_setting("float_shortcut", "none") == "alt+e" else 0)
+        greetings = ["工作辛苦，也要保持开心鸭！", "慢慢推进，今天也很棒！", "稳稳完成眼前这一件就好。"]
+        try:
+            saved_greetings = json.loads(self.db.get_setting("saved_float_greetings", "[]"))
+        except json.JSONDecodeError:
+            saved_greetings = []
+        greeting = QComboBox()
+        greeting.setEditable(True)
+        greeting.addItems([*greetings, *[text for text in saved_greetings if text not in greetings]])
+        saved_greeting = self.db.get_setting("float_greeting", greetings[0])
+        if greeting.findText(saved_greeting) < 0:
+            greeting.addItem(saved_greeting)
+        greeting.setCurrentText(saved_greeting)
         encouragement = []
-        from PyQt6.QtWidgets import QLineEdit
-        for slot in range(4, 7):
+        for slot in range(1, 5):
             edit = QLineEdit(self.db.get_setting(f"float_text_{slot}", ""))
             edit.setPlaceholderText("没有指定事项时显示的鼓励文字")
             encouragement.append((slot, edit))
         form.addRow("下班时间", end_time)
         form.addRow("", autostart)
-        form.addRow("浮窗位 4 鼓励文字", encouragement[0][1])
-        form.addRow("浮窗位 5 鼓励文字", encouragement[1][1])
-        form.addRow("浮窗位 6 鼓励文字", encouragement[2][1])
+        form.addRow("顶部鼓励语", greeting)
+        form.addRow("倒计时待办数量", countdown_count)
+        form.addRow("手动固定浮窗位数量", manual_count)
+        form.addRow("弹出快捷键", shortcut)
+        for slot, edit in encouragement:
+            form.addRow(f"浮窗位置 {slot} 鼓励文字", edit)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Save)
         form.addRow(buttons)
         buttons.rejected.connect(dialog.reject)
         buttons.accepted.connect(dialog.accept)
+        # The two float slot counters are deliberately previewed before saving so
+        # the user can see the panel change immediately. Cancel restores saved data.
+        countdown_count.valueChanged.connect(
+            lambda value: self.refresh_float(countdown_count=value, manual_count=manual_count.value())
+        )
+        manual_count.valueChanged.connect(
+            lambda value: self.refresh_float(countdown_count=countdown_count.value(), manual_count=value)
+        )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.db.set_setting("off_work_time", end_time.time().toString("HH:mm"))
             self.db.set_setting("autostart", "1" if autostart.isChecked() else "0")
+            chosen_greeting = greeting.currentText().strip() or greetings[0]
+            if chosen_greeting not in greetings and chosen_greeting not in saved_greetings:
+                saved_greetings.append(chosen_greeting)
+            self.db.set_setting("saved_float_greetings", json.dumps(saved_greetings, ensure_ascii=False))
+            self.db.set_setting("float_greeting", chosen_greeting)
+            self.db.set_setting("countdown_float_count", str(countdown_count.value()))
+            self.db.set_setting("manual_float_count", str(manual_count.value()))
+            self.db.set_setting("float_shortcut", shortcut.currentData())
             for slot, edit in encouragement:
                 self.db.set_setting(f"float_text_{slot}", edit.text().strip())
             self.set_autostart(autostart.isChecked())
+            if shortcut.currentData() != "none" and not self.apply_shortcut(shortcut.currentData()):
+                self.show_notice("Alt + E 未能启用，可能正被其他软件占用。")
+            self.refresh_float()
+        else:
             self.refresh_float()
 
     def set_autostart(self, enabled: bool) -> None:

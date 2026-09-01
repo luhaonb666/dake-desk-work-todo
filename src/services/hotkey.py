@@ -24,8 +24,12 @@ class GlobalHotkey(QAbstractNativeEventFilter):
         self.hotkey_id = 31415
         self.registered = False
 
-    def register(self) -> bool:
-        if sys.platform != "win32":
+    def register(self, shortcut: str = "none") -> bool:
+        self.unregister()
+        if sys.platform != "win32" or shortcut.lower() == "none":
+            return False
+        if shortcut.lower() != "alt+e":
+            logging.warning("Unsupported shortcut requested: %s", shortcut)
             return False
         result = ctypes.windll.user32.RegisterHotKey(None, self.hotkey_id, MOD_ALT, ord("E"))
         self.registered = bool(result)

@@ -1,5 +1,5 @@
 #define AppName "Work Todo"
-#define AppVersion "1.0.0"
+#define AppVersion "1.1"
 #define AppPublisher "Work Todo"
 #define AppExeName "WorkTodo.exe"
 

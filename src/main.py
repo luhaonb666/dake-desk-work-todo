@@ -38,8 +38,9 @@ def main() -> int:
     window = MainWindow()
     hotkey = GlobalHotkey(window.show_editor)
     app.installNativeEventFilter(hotkey)
-    if not hotkey.register():
-        logging.warning("Global Alt+E was not available")
+    shortcut = window.db.get_setting("float_shortcut", "none")
+    if shortcut != "none" and not hotkey.register(shortcut):
+        logging.warning("Configured global shortcut was not available")
     if args.background:
         window.hide()
     else:
