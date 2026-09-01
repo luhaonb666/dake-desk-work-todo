@@ -2,8 +2,46 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QPoint, QPropertyAnimation, QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import QPoint, QPropertyAnimation, QRect, QTimer, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QPainter, QPen
 from PyQt6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+
+
+class FloatBadge(QWidget):
+    """Paint time diagonally, while keeping manual slot numbers near the top."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setFixedWidth(27)
+        self.value = ""
+        self.color = QColor("#64707e")
+
+    def set_value(self, value: str, color: str) -> None:
+        self.value = value
+        self.color = QColor(color)
+        self.update()
+
+    def paintEvent(self, event):  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(self.color)
+        if ":" in self.value:
+            hour, minute = self.value.split(":", 1)
+            font = QFont(self.font())
+            font.setPointSize(8)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(QRect(0, 0, 19, self.height() // 2 + 4), Qt.AlignmentFlag.AlignLeft, hour)
+            painter.drawText(QRect(7, self.height() // 2 - 4, 20, self.height() // 2 + 4), Qt.AlignmentFlag.AlignRight, minute)
+            painter.setPen(QPen(self.color, 1))
+            painter.drawLine(11, self.height() // 2 + 3, 17, self.height() // 2 - 3)
+        else:
+            font = QFont(self.font())
+            font.setPointSize(12)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(QRect(0, 1, self.width(), self.height() // 2 + 8), Qt.AlignmentFlag.AlignHCenter, self.value)
+        painter.end()
 
 
 class FloatCard(QFrame):
@@ -14,14 +52,17 @@ class FloatCard(QFrame):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(5, 3, 6, 3)
         layout.setSpacing(3)
-        self.badge = QLabel()
-        self.badge.setFixedWidth(20)
-        self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+        self.badge = FloatBadge()
         self.text = QLabel()
         self.text.setWordWrap(False)
         layout.addWidget(self.badge, 0, Qt.AlignmentFlag.AlignTop)
         layout.addWidget(self.text, 1)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._kind = "manual"
+        self._highlighted = False
+        self._pulse_on = False
+        self._badge_text = ""
+        self._badge_color = "#64707e"
 
     def set_density(self, height: int) -> None:
         self.setMinimumHeight(height)
@@ -29,20 +70,11 @@ class FloatCard(QFrame):
 
     def update_card(self, badge: str, text: str, *, kind: str, highlighted: bool = False) -> None:
         manual_break = "\n" in text
-        if highlighted:
-            background, border, badge_color = "#ffffff", "#438bd0", "#1766ab"
-        elif kind == "countdown":
-            background, border, badge_color = "#fff7e8", "#f2d5a7", "#9a6d24"
-        else:
-            background, border, badge_color = "#f5f7fa", "#dce3eb", "#64707e"
+        self._kind = kind
+        self._highlighted = highlighted
+        self._pulse_on = False
+        self._badge_text = badge
         font_size = 11 if manual_break else 14
-        self.setStyleSheet(
-            f"background:{background}; border:{'3' if highlighted else '1'}px solid {border}; border-radius:13px; color:#3e4854;"
-        )
-        self.badge.setText(badge)
-        self.badge.setStyleSheet(
-            f"border:none; background:transparent; color:{badge_color}; font-size:10px; font-weight:700;"
-        )
         shown = text
         if not manual_break and len(text) > 12:
             shown = text[:11] + "…"
@@ -50,6 +82,26 @@ class FloatCard(QFrame):
         self.text.setStyleSheet(
             f"border:none; background:transparent; color:#3e4854; font-size:{font_size}px; font-weight:600;"
         )
+        self._apply_style()
+
+    def set_pulse(self, enabled: bool) -> None:
+        if self._highlighted:
+            self._pulse_on = enabled
+            self._apply_style()
+
+    def _apply_style(self) -> None:
+        if self._highlighted:
+            background = "#fff0a8" if self._pulse_on else "#ffffff"
+            border, badge_color, width = "#c88a08", "#9a6100", 3
+        elif self._kind == "countdown":
+            background, border, badge_color, width = "#fff7e8", "#f2d5a7", "#9a6d24", 1
+        else:
+            background, border, badge_color, width = "#f5f7fa", "#dce3eb", "#64707e", 1
+        self._badge_color = badge_color
+        self.setStyleSheet(
+            f"background:{background}; border:{width}px solid {border}; border-radius:13px; color:#3e4854;"
+        )
+        self.badge.set_value(self._badge_text, badge_color)
 
 
 class FloatWindow(QWidget):
@@ -64,7 +116,7 @@ class FloatWindow(QWidget):
 
     def __init__(self) -> None:
         super().__init__(None)
-        self.setWindowTitle("工作待办 V1.3 · 浮窗")
+        self.setWindowTitle("工作待办 V1.6.1 · 浮窗")
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(self.EXPANDED_WIDTH)
@@ -84,6 +136,12 @@ class FloatWindow(QWidget):
         self._expand_guard_timer = QTimer(self)
         self._expand_guard_timer.setSingleShot(True)
         self._expand_guard_timer.timeout.connect(self._release_expand_guard)
+        self._pulse_timer = QTimer(self)
+        self._pulse_timer.setInterval(420)
+        self._pulse_timer.timeout.connect(self._advance_pulse)
+        self._pulse_step = 0
+        self._pulse_header = False
+        self._alert_message = ""
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(6, 6, 6, 6)
@@ -129,14 +187,17 @@ class FloatWindow(QWidget):
 
     def _apply_header(self, text: str, mode: str) -> None:
         if mode == "alert":
-            background, border, color = "#fffbea", "#ead7a2", "#806628"
+            background = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #fff4ad,stop:0.46 #d9a72e,stop:0.54 #fff8c8,stop:1 #b67b0d)"
+            border, color, width = "#9f6800", "#4d3600", 2
         elif mode == "overtime":
-            background, border, color = "#e7edf3", "#aab8c7", "#435365"
+            background = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #edf2f6,stop:0.45 #aebbc8,stop:0.54 #f7f9fb,stop:1 #94a3b2)"
+            border, color, width = "#8695a5", "#334455", 1
         else:
-            background, border, color = "#e8edf2", "#b7c2cd", "#435365"
+            background = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #f1f4f7,stop:0.44 #b9c4cf,stop:0.53 #ffffff,stop:1 #9eabb8)"
+            border, color, width = "#8998a7", "#334455", 1
         self.greeting.setText(text)
         self.greeting.setStyleSheet(
-            f"background:{background}; border:1px solid {border}; border-radius:10px; "
+            f"background:{background}; border:{width}px solid {border}; border-radius:10px; "
             f"font-size:12px; font-weight:700; color:{color}; padding:3px 6px;"
         )
 
@@ -207,6 +268,7 @@ class FloatWindow(QWidget):
         self._dock_y = y
         self._animate_to((screen.right() - self.PEEK_WIDTH, y))
         if self._alert_open:
+            self._stop_pulse()
             self._alert_open = False
             self._temporary_header = False
             self._restore_header()
@@ -225,9 +287,39 @@ class FloatWindow(QWidget):
         if message:
             self._temporary_header = True
             self._apply_header(message, "alert")
+        self._pulse_header = bool(message)
+        self._alert_message = message
+        self._pulse_step = 0
+        self._pulse_timer.start()
         self._alert_open = True
         self.expand()
         self._collapse_timer.start(5_000)
+
+    def _advance_pulse(self) -> None:
+        self._pulse_step += 1
+        on = self._pulse_step % 2 == 1
+        if self._pulse_header and self._alert_message:
+            if on:
+                self.greeting.setStyleSheet(
+                    "background:#fff9d7; border:3px solid #c38808; border-radius:10px; "
+                    "font-size:12px; font-weight:700; color:#4d3600; padding:2px 5px;"
+                )
+            else:
+                self._apply_header(self._alert_message, "alert")
+        else:
+            for card in self._cards:
+                card.set_pulse(on)
+        if self._pulse_step >= 6:
+            self._pulse_timer.stop()
+            if self._pulse_header and self._alert_message:
+                self._apply_header(self._alert_message, "alert")
+            for card in self._cards:
+                card.set_pulse(False)
+
+    def _stop_pulse(self) -> None:
+        self._pulse_timer.stop()
+        for card in self._cards:
+            card.set_pulse(False)
 
     def enterEvent(self, event):  # noqa: N802
         self._collapse_timer.stop()

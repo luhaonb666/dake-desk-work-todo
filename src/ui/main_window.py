@@ -37,15 +37,15 @@ def app_icon() -> QIcon:
 
 
 class TaskCard(QFrame):
-    def __init__(self, task, on_complete, on_edit, on_float, on_delete, parent=None) -> None:
+    def __init__(self, task, on_complete, on_edit, on_float, on_delete, parent=None, preview: bool = False) -> None:
         super().__init__(parent)
         self.setObjectName("taskCard")
         overdue = bool(task["due_time"] and not task["is_completed"] and datetime.strptime(
             f"{task['task_date']} {task['due_time']}", "%Y-%m-%d %H:%M"
         ) < datetime.now())
-        color, border = ("#edf3ff", "#bcd0f7") if task["is_fixed"] else (
+        color, border = ("#eceeef", "#d1d5da") if preview else (("#edf3ff", "#bcd0f7") if task["is_fixed"] else (
             ("#fff1f1", "#efc4c4") if overdue else ("#ffffff", "#e5e8ec")
-        )
+        ))
         self.setStyleSheet(f"QFrame#taskCard {{background:{color}; border:1px solid {border}; border-radius:12px;}}")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 10, 10, 10)
@@ -82,17 +82,17 @@ class TaskCard(QFrame):
 
 class MainWindow(QMainWindow):
     DEFAULT_GREETINGS = [
-        "工作辛苦，也要保持开心鸭！",
+        "我为亚泰添砖加瓦",
+        "工作辛苦，你也要保持开心鸭！",
         "慢慢推进，今天也很棒！",
         "稳稳完成眼前这一件就好。",
-        "我为亚泰添砖加瓦",
     ]
 
     def __init__(self) -> None:
         super().__init__()
         self.db = Database(app_data_dir() / "work-todo.db")
         self.db.ensure_settings_table()
-        self.setWindowTitle("工作待办 V1.4")
+        self.setWindowTitle("工作待办 V1.6.1")
         self.setWindowIcon(app_icon())
         self.resize(760, 760)
         self.setMinimumSize(570, 520)
@@ -123,7 +123,7 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(22, 18, 22, 18)
         outer.setSpacing(12)
         header = QHBoxLayout()
-        title = QLabel("工作待办 V1.4")
+        title = QLabel("工作待办 V1.6.1")
         title.setStyleSheet("font-size:26px; font-weight:700; color:#1f2937;")
         self.header_greeting = QLabel()
         self.header_greeting.setWordWrap(True)
@@ -212,7 +212,7 @@ class MainWindow(QMainWindow):
 
     def _build_tray(self) -> None:
         self.tray = QSystemTrayIcon(self.windowIcon(), self)
-        self.tray.setToolTip("工作待办 V1.4")
+        self.tray.setToolTip("工作待办 V1.6.1")
         menu = QMenu(self)
         open_action = QAction("打开编辑主窗", self)
         open_action.triggered.connect(self.show_editor)
@@ -235,9 +235,9 @@ class MainWindow(QMainWindow):
                 item.widget().deleteLater()
 
     @staticmethod
-    def section_label(text: str) -> QLabel:
+    def section_label(text: str, top_padding: int = 12) -> QLabel:
         label = QLabel(text)
-        label.setStyleSheet("font-size:12px; color:#77808c; font-weight:700; padding:12px 2px 3px;")
+        label.setStyleSheet(f"font-size:12px; color:#77808c; font-weight:700; padding:{top_padding}px 2px 3px;")
         return label
 
     def _offwork_datetime(self, now: datetime | None = None) -> datetime | None:
@@ -289,9 +289,10 @@ class MainWindow(QMainWindow):
             self.list_layout.addStretch(1)
             self.refresh_float()
             return
-        # A timed pinned task deliberately appears in both sections: today gives
-        # it chronological context, while the second copy keeps it visibly pinned.
-        normal = tasks
+        # Timed pinned tasks join the ordinary chronological flow while retaining
+        # their blue pinned background. Untimed pinned tasks live only below.
+        normal = [task for task in tasks if not task["is_fixed"] or task["due_time"]]
+        normal.sort(key=lambda task: (task["due_time"] is None, task["due_time"] or "", task["created_at"]))
         fixed = [task for task in tasks if task["is_fixed"]]
         if normal:
             self.list_layout.addWidget(self.section_label("今日事项"))
@@ -302,7 +303,7 @@ class MainWindow(QMainWindow):
             empty.setStyleSheet("color:#87909c; padding:28px 6px;")
             self.list_layout.addWidget(empty)
         if fixed:
-            self.list_layout.addWidget(self.section_label("固定待办"))
+            self.list_layout.addWidget(self.section_label("固定待办", 4))
             for task in fixed:
                 self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task))
         if self.tabs.currentIndex() == 0:
@@ -311,11 +312,19 @@ class MainWindow(QMainWindow):
             preview = [task for task in tomorrow_tasks if not task["is_fixed"]][:2]
             preview += [task for task in tomorrow_tasks if task["is_fixed"]][:2]
             if preview:
-                self.list_layout.addWidget(self.section_label("明日预览（继续向下滚动查看）"))
+                self.list_layout.addSpacing(18)
+                preview_host = QFrame()
+                preview_host.setObjectName("previewArea")
+                preview_host.setStyleSheet("QFrame#previewArea {background:#e9ebee; border:none; border-radius:12px;}")
+                preview_layout = QVBoxLayout(preview_host)
+                preview_layout.setContentsMargins(8, 4, 8, 8)
+                preview_layout.setSpacing(7)
+                preview_layout.addWidget(self.section_label("明日预览（继续向下滚动查看）", 5))
                 for task in preview:
-                    card = TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task)
-                    card.setWindowOpacity(0.78)
-                    self.list_layout.addWidget(card)
+                    preview_layout.addWidget(
+                        TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, preview=True)
+                    )
+                self.list_layout.addWidget(preview_host)
         self.list_layout.addStretch(1)
         self.refresh_float()
 
@@ -557,11 +566,15 @@ class MainWindow(QMainWindow):
                 greetings = []
         except json.JSONDecodeError:
             greetings = []
-        greetings = [text for text in greetings if isinstance(text, str) and text.strip()] or self.DEFAULT_GREETINGS.copy()
+        greetings = [text for text in greetings if isinstance(text, str) and text.strip()]
+        if self.db.get_setting("greetings_v161_seeded", "0") != "1":
+            greetings = [*self.DEFAULT_GREETINGS, *[text for text in greetings if text not in self.DEFAULT_GREETINGS]]
+            self.db.set_setting("saved_float_greetings", json.dumps(greetings, ensure_ascii=False))
+            self.db.set_setting("greetings_v161_seeded", "1")
         greeting = QComboBox()
         greeting.setEditable(True)
         greeting.addItems(greetings)
-        saved_greeting = self.db.get_setting("float_greeting", greetings[0])
+        saved_greeting = self.db.get_setting("float_greeting", greetings[0] if greetings else "")
         greeting.setCurrentText(saved_greeting)
         delete_greeting = QPushButton("删除当前鼓励语")
         def remove_greeting() -> None:
@@ -578,17 +591,32 @@ class MainWindow(QMainWindow):
             edit = QLineEdit(self.db.get_setting(f"float_text_{slot}", ""))
             edit.setPlaceholderText("没有指定事项时显示的固定文字")
             fixed_texts.append((slot, edit))
+        def add_section(title: str) -> None:
+            if form.rowCount():
+                divider = QFrame()
+                divider.setFrameShape(QFrame.Shape.HLine)
+                divider.setStyleSheet("color:#d8dce2; margin-top:7px; margin-bottom:5px;")
+                form.addRow(divider)
+            section = QLabel(title)
+            section.setStyleSheet("font-size:13px; font-weight:700; color:#5c6673; padding-top:2px;")
+            form.addRow(section)
+
+        add_section("工作时间与启动")
         form.addRow("下班时间", end_time)
         form.addRow("", autostart)
+        add_section("提醒设置")
         form.addRow("", offwork_enabled)
         form.addRow("下班提醒时间", offwork_lead)
         form.addRow("", water_enabled)
         form.addRow("", overtime_enabled)
         form.addRow("加班提醒频率", overtime_cadence)
+        add_section("鼓励语")
         form.addRow("顶部鼓励语", greeting_box)
+        add_section("浮窗显示")
         form.addRow("倒计时待办数量", countdown_count)
         form.addRow("手动固定浮窗位数量", manual_count)
         form.addRow("弹出快捷键", shortcut)
+        add_section("固定文字")
         for slot, edit in fixed_texts:
             form.addRow(f"浮窗位置 {slot} 固定文字", edit)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Save)
