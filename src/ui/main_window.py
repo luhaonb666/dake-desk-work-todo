@@ -7,19 +7,23 @@ import logging
 import sys
 from datetime import datetime, timedelta
 
-from PyQt6.QtCore import QDate, QTime, QTimer, Qt
+from PyQt6.QtCore import QDate, QTimer, Qt
 from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QFormLayout,
-    QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
-    QPushButton, QScrollArea, QSpinBox, QSystemTrayIcon, QTabBar, QTimeEdit,
-    QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QDateEdit, QDialog, QFrame, QHBoxLayout, QLabel,
+    QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QSystemTrayIcon,
+    QTabBar, QVBoxLayout, QWidget,
 )
 
 from app_paths import app_data_dir
 from storage.database import Database
 from ui.float_window import FloatWindow
+from ui.settings_dialog import SettingsDialog
 from ui.task_dialog import TaskDialog
+from ui.theme import APP_STYLE, TASK_CARD_COLORS
+
+
+APP_VERSION = "2.1.0"
 
 
 def app_icon() -> QIcon:
@@ -43,9 +47,8 @@ class TaskCard(QFrame):
         overdue = bool(task["due_time"] and not task["is_completed"] and datetime.strptime(
             f"{task['task_date']} {task['due_time']}", "%Y-%m-%d %H:%M"
         ) < datetime.now())
-        color, border = ("#eceeef", "#d1d5da") if preview else (("#edf3ff", "#bcd0f7") if task["is_fixed"] else (
-            ("#fff1f1", "#efc4c4") if overdue else ("#ffffff", "#e5e8ec")
-        ))
+        state = "preview" if preview else ("fixed" if task["is_fixed"] else ("overdue" if overdue else "normal"))
+        color, border = TASK_CARD_COLORS[state]
         self.setStyleSheet(f"QFrame#taskCard {{background:{color}; border:1px solid {border}; border-radius:12px;}}")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 10, 10, 10)
@@ -83,16 +86,16 @@ class TaskCard(QFrame):
 class MainWindow(QMainWindow):
     DEFAULT_GREETINGS = [
         "我为亚泰添砖加瓦",
-        "工作辛苦，你也要保持开心鸭！",
-        "慢慢推进，今天也很棒！",
-        "稳稳完成眼前这一件就好。",
+        "工作辛苦\n你也要保持开心鸭！",
+        "慢慢推进\n今天非常棒！",
     ]
 
     def __init__(self) -> None:
         super().__init__()
         self.db = Database(app_data_dir() / "work-todo.db")
         self.db.ensure_settings_table()
-        self.setWindowTitle("工作待办 V1.6.1")
+        self._ensure_v21_greetings()
+        self.setWindowTitle(f"工作待办 V{APP_VERSION}")
         self.setWindowIcon(app_icon())
         self.resize(760, 760)
         self.setMinimumSize(570, 520)
@@ -115,6 +118,40 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(250, self.restore_float)
         QTimer.singleShot(1_000, self.check_reminders)
 
+    def _ensure_v21_greetings(self) -> None:
+        """Migrate built-in wording and remove the retired fourth greeting."""
+        if self.db.get_setting("greetings_v210_seeded", "0") == "1":
+            return
+        try:
+            saved = json.loads(self.db.get_setting("saved_float_greetings", ""))
+            if not isinstance(saved, list):
+                saved = []
+        except json.JSONDecodeError:
+            saved = []
+        replacements = {
+            "工作辛苦，你也要保持开心鸭！": self.DEFAULT_GREETINGS[1],
+            "慢慢推进，今天也很棒！": self.DEFAULT_GREETINGS[2],
+        }
+        removed_defaults = {"稳稳完成眼前这一件就好。"}
+        migrated: list[str] = []
+        for text in [*self.DEFAULT_GREETINGS, *saved]:
+            if not isinstance(text, str) or not text.strip():
+                continue
+            text = replacements.get(text.strip(), text.strip())
+            if text in removed_defaults:
+                continue
+            if text not in migrated:
+                migrated.append(text)
+        current = self.db.get_setting("float_greeting", self.DEFAULT_GREETINGS[0]).strip()
+        current = replacements.get(current, current)
+        if current in removed_defaults:
+            current = self.DEFAULT_GREETINGS[0]
+        if current and current not in migrated:
+            migrated.append(current)
+        self.db.set_setting("saved_float_greetings", json.dumps(migrated, ensure_ascii=False))
+        self.db.set_setting("float_greeting", current or (migrated[0] if migrated else ""))
+        self.db.set_setting("greetings_v210_seeded", "1")
+
     def _build_ui(self) -> None:
         root = QWidget()
         root.setObjectName("root")
@@ -122,15 +159,21 @@ class MainWindow(QMainWindow):
         outer = QVBoxLayout(root)
         outer.setContentsMargins(22, 18, 22, 18)
         outer.setSpacing(12)
+
+        header_panel = QFrame()
+        header_panel.setObjectName("chromePanel")
+        header_outer = QVBoxLayout(header_panel)
+        header_outer.setContentsMargins(16, 13, 16, 11)
+        header_outer.setSpacing(7)
         header = QHBoxLayout()
-        title = QLabel("工作待办 V1.6.1")
-        title.setStyleSheet("font-size:26px; font-weight:700; color:#1f2937;")
+        title = QLabel(f"工作待办 V{APP_VERSION}")
+        title.setStyleSheet("font-size:25px; font-weight:700; color:#27364a;")
         self.header_greeting = QLabel()
         self.header_greeting.setWordWrap(True)
         self.header_greeting.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.header_greeting.setStyleSheet(
-            "background:#f1edf9; border:1px solid #ded4ed; border-radius:10px; color:#66527f; "
-            "font-size:13px; font-weight:600; padding:5px 9px;"
+            "background:#f1effa; border:1px solid #ddd7ef; border-radius:10px; color:#66527f; "
+            "font-size:13px; font-weight:600; padding:6px 10px;"
         )
         header.addWidget(title)
         greeting_column = QVBoxLayout()
@@ -150,18 +193,26 @@ class MainWindow(QMainWindow):
         fullscreen = QPushButton("全屏")
         fullscreen.clicked.connect(self.toggle_fullscreen)
         header.addWidget(fullscreen)
-        outer.addLayout(header)
+        header_outer.addLayout(header)
         details = QHBoxLayout()
         self.subtitle = QLabel()
         self.subtitle.setStyleSheet("font-size:13px; color:#7a8491;")
         details.addWidget(self.subtitle)
         details.addStretch()
-        outer.addLayout(details)
+        header_outer.addLayout(details)
+        outer.addWidget(header_panel)
+
         self.notice = QLabel()
         self.notice.setVisible(False)
-        self.notice.setStyleSheet("background:#fff5d8; color:#7a5510; border-radius:8px; padding:8px 10px;")
+        self.notice.setStyleSheet(
+            "background:#fff8df; color:#7a5510; border:1px solid #f0dda2; border-radius:9px; padding:8px 10px;"
+        )
         outer.addWidget(self.notice)
+
+        toolbar_panel = QFrame()
+        toolbar_panel.setObjectName("chromePanel")
         toolbar = QHBoxLayout()
+        toolbar.setContentsMargins(10, 5, 10, 5)
         self.tabs = QTabBar()
         self.tabs.addTab("全部")
         self.tabs.addTab("未完成")
@@ -182,7 +233,9 @@ class MainWindow(QMainWindow):
         add.setObjectName("primaryButton")
         add.clicked.connect(self.add_task)
         toolbar.addWidget(add)
-        outer.addLayout(toolbar)
+        toolbar_panel.setLayout(toolbar)
+        outer.addWidget(toolbar_panel)
+
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -193,15 +246,9 @@ class MainWindow(QMainWindow):
         self.list_layout.addStretch()
         self.scroll.setWidget(self.list_host)
         outer.addWidget(self.scroll, 1)
-        self.setStyleSheet("""
-            QWidget#root { background:#fbf9ff; }
-            QPushButton { background:#ffffff; border:1px solid #e6dfef; border-radius:12px; padding:7px 11px; color:#514c61; }
-            QPushButton:hover { background:#f4efff; }
-            QPushButton#primaryButton { background:#9f86d9; color:white; border:none; font-weight:600; }
-            QPushButton#primaryButton:hover { background:#8b70cb; }
-            QPushButton#quietButton { border:none; background:transparent; color:#718096; padding:3px 5px; font-size:12px; }
-            QTabBar::tab { background:transparent; color:#77808c; padding:8px 13px; border-bottom:2px solid transparent; }
-            QTabBar::tab:selected { color:#315fc9; border-bottom:2px solid #4f7cff; font-weight:600; }
+        self.setStyleSheet(APP_STYLE + """
+            QFrame#chromePanel { background:#f4f7fc; border:1px solid #dce6f5; border-radius:14px; }
+            QFrame#previewArea { background:#e9ecef; border:1px solid #dde1e5; border-radius:13px; }
         """)
 
     def on_tab_changed(self, index: int) -> None:
@@ -212,7 +259,7 @@ class MainWindow(QMainWindow):
 
     def _build_tray(self) -> None:
         self.tray = QSystemTrayIcon(self.windowIcon(), self)
-        self.tray.setToolTip("工作待办 V1.6.1")
+        self.tray.setToolTip(f"工作待办 V{APP_VERSION}")
         menu = QMenu(self)
         open_action = QAction("打开编辑主窗", self)
         open_action.triggered.connect(self.show_editor)
@@ -248,13 +295,26 @@ class MainWindow(QMainWindow):
             logging.warning("Invalid off-work setting")
             return None
 
+    def _setting_list(self, key: str, default: list[str]) -> list[str]:
+        try:
+            value = json.loads(self.db.get_setting(key, ""))
+        except json.JSONDecodeError:
+            return list(default)
+        return [str(item) for item in value] if isinstance(value, list) else list(default)
+
+    @staticmethod
+    def _format_hours(hours: float) -> str:
+        return str(int(hours)) if hours.is_integer() else str(hours)
+
     def _overtime_header(self, now: datetime) -> str:
         end = self._offwork_datetime(now)
         if not end:
             return ""
         minutes = int((now - end).total_seconds() // 60)
-        if minutes < 60:
+        if minutes < 0:
             return ""
+        if minutes < 60:
+            return "正在加班\n你今天辛苦啦！"
         hours, remainder = divmod(minutes, 60)
         if remainder < 20:
             shown = float(hours)
@@ -262,9 +322,13 @@ class MainWindow(QMainWindow):
             shown = hours + 0.5
         else:
             shown = float(hours + 1)
-        amount = str(int(shown)) if shown.is_integer() else str(shown)
-        ending = "夜深了回家注意安全！" if shown >= 1.5 else "你辛苦啦！"
-        return f"加班 {amount} 小时了，{ending}"
+        ending = "夜深了 回家注意安全哦" if shown >= 1.5 else "你今天辛苦啦！"
+        return f"加班 {self._format_hours(shown)} 小时了\n{ending}"
+
+    def _overtime_reminder_message(self, elapsed_minutes: int) -> str:
+        hours = elapsed_minutes / 60
+        ending = "夜深了 回家注意安全哦" if hours >= 1.5 else "你今天辛苦啦！"
+        return f"加班 {self._format_hours(hours)} 小时了\n{ending}"
 
     def _refresh_header(self, now: datetime) -> None:
         greeting = self.db.get_setting("float_greeting", self.DEFAULT_GREETINGS[0])
@@ -315,7 +379,9 @@ class MainWindow(QMainWindow):
                 self.list_layout.addSpacing(18)
                 preview_host = QFrame()
                 preview_host.setObjectName("previewArea")
-                preview_host.setStyleSheet("QFrame#previewArea {background:#e9ebee; border:none; border-radius:12px;}")
+                preview_host.setStyleSheet(
+                    "QFrame#previewArea {background:#e8eaed; border:1px solid #d9dde2; border-radius:13px;}"
+                )
                 preview_layout = QVBoxLayout(preview_host)
                 preview_layout.setContentsMargins(8, 4, 8, 8)
                 preview_layout.setSpacing(7)
@@ -460,31 +526,67 @@ class MainWindow(QMainWindow):
 
     def _trigger_float(self, message: str = "") -> None:
         if self.float_is_enabled():
-            self.float_window.show_alert(message)
+            overtime_active = bool(self._overtime_header(datetime.now()))
+            # Once overtime starts, the float header remains the overtime status.
+            # Other reminder types may still expand the float but cannot replace it.
+            if overtime_active and message and not message.startswith("加班 "):
+                self.float_window.show_alert()
+            else:
+                self.float_window.show_alert(message)
 
     def _check_lifestyle_reminders(self, now: datetime) -> list[str]:
         messages: list[str] = []
         end = self._offwork_datetime(now)
-        if not end:
-            return messages
         today = now.date().isoformat()
-        if self.db.get_setting("offwork_enabled", "1") == "1":
-            lead = int(self.db.get_setting("offwork_lead_minutes", "5"))
-            key = f"offwork_reminded_{today}"
-            seconds = (end - now).total_seconds()
-            if 0 < seconds <= lead * 60 and not self.db.get_setting(key):
-                self.db.set_setting(key, "1")
-                messages.append(f"还有 {lead} 分钟下班了，你辛苦啦！")
+
         if self.db.get_setting("water_enabled", "1") == "1":
-            for value in ("10:15", "15:15"):
+            custom = [value for value in self._setting_list("water_custom_times", ["", "", ""]) if value]
+            water_times = list(dict.fromkeys(["10:15", "15:15", *custom]))
+            for value in water_times:
                 key = f"water_reminded_{today}_{value}"
-                target = datetime.strptime(f"{today} {value}", "%Y-%m-%d %H:%M")
+                try:
+                    target = datetime.strptime(f"{today} {value}", "%Y-%m-%d %H:%M")
+                except ValueError:
+                    logging.warning("Invalid water reminder time: %s", value)
+                    continue
                 elapsed = (now - target).total_seconds()
                 if 0 <= elapsed <= 60 and not self.db.get_setting(key):
                     self.db.set_setting(key, "1")
-                    messages.append("喝水时间到啦，你辛苦啦！")
-        if self.db.get_setting("overtime_enabled", "1") == "1":
-            cadence = int(self.db.get_setting("overtime_cadence", "60"))
+                    if value == "15:15":
+                        messages.append("下午三点，饮茶了先！\n你辛苦啦！")
+                    else:
+                        messages.append("喝水时间到了\n你辛苦啦！")
+
+        if self.db.get_setting("meal_enabled", "0") == "1":
+            for value in self._setting_list("meal_times", ["11:59", "17:59"]):
+                key = f"meal_reminded_{today}_{value}"
+                try:
+                    target = datetime.strptime(f"{today} {value}", "%Y-%m-%d %H:%M")
+                except ValueError:
+                    logging.warning("Invalid meal reminder time: %s", value)
+                    continue
+                elapsed = (now - target).total_seconds()
+                if 0 <= elapsed <= 60 and not self.db.get_setting(key):
+                    self.db.set_setting(key, "1")
+                    messages.append("马上就吃饭啦\n你今天辛苦啦！")
+
+        if end and self.db.get_setting("offwork_enabled", "0") == "1":
+            leads = self._setting_list(
+                "offwork_lead_minutes_list", [self.db.get_setting("offwork_lead_minutes", "5")]
+            )
+            seconds = (end - now).total_seconds()
+            for raw_lead in leads:
+                try:
+                    lead = int(raw_lead)
+                except ValueError:
+                    continue
+                key = f"offwork_reminded_{today}_{lead}"
+                if 0 < seconds <= lead * 60 and not self.db.get_setting(key):
+                    self.db.set_setting(key, "1")
+                    messages.append(f"还有 {lead} 分钟下班了\n你今天辛苦啦！")
+
+        if end and self.db.get_setting("overtime_enabled", "1") == "1":
+            cadence = int(self.db.get_setting("overtime_cadence", "30"))
             elapsed = int((now - end).total_seconds())
             if elapsed >= cadence * 60:
                 count = elapsed // (cadence * 60)
@@ -492,11 +594,13 @@ class MainWindow(QMainWindow):
                 key = f"overtime_reminded_{today}_{count}_{cadence}"
                 if remainder <= 60 and not self.db.get_setting(key):
                     self.db.set_setting(key, "1")
-                    messages.append(self._overtime_header(now))
+                    messages.append(self._overtime_reminder_message(count * cadence))
         return [message for message in messages if message]
 
     def check_reminders(self) -> None:
         now = datetime.now()
+        if self.isVisible():
+            self._refresh_header(now)
         task_alerts: set[int] = set()
         for task in self.db.tasks_needing_reminder(self.db.today()):
             due = datetime.strptime(f"{task['task_date']} {task['due_time']}", "%Y-%m-%d %H:%M")
@@ -527,39 +631,6 @@ class MainWindow(QMainWindow):
         self.render()
 
     def open_settings(self) -> None:
-        dialog = QDialog(self)
-        dialog.setWindowTitle("设置")
-        dialog.setMinimumWidth(530)
-        form = QFormLayout(dialog)
-        end_time = QTimeEdit()
-        end_time.setDisplayFormat("HH:mm")
-        end_time.setTime(QTime.fromString(self.db.get_setting("off_work_time", "18:10"), "HH:mm"))
-        autostart = QCheckBox("开机后在后台启动")
-        autostart.setChecked(self.db.get_setting("autostart", "1") == "1")
-        offwork_enabled = QCheckBox("开启下班提醒")
-        offwork_enabled.setChecked(self.db.get_setting("offwork_enabled", "1") == "1")
-        offwork_lead = QComboBox()
-        for minutes in (1, 5, 10, 15):
-            offwork_lead.addItem(f"下班前 {minutes} 分钟", str(minutes))
-        offwork_lead.setCurrentIndex(max(0, offwork_lead.findData(self.db.get_setting("offwork_lead_minutes", "5"))))
-        water_enabled = QCheckBox("开启喝水提醒（10:15、15:15）")
-        water_enabled.setChecked(self.db.get_setting("water_enabled", "1") == "1")
-        overtime_enabled = QCheckBox("开启加班提醒")
-        overtime_enabled.setChecked(self.db.get_setting("overtime_enabled", "1") == "1")
-        overtime_cadence = QComboBox()
-        overtime_cadence.addItem("每 1 小时提醒（默认）", "60")
-        overtime_cadence.addItem("每半小时提醒", "30")
-        overtime_cadence.setCurrentIndex(max(0, overtime_cadence.findData(self.db.get_setting("overtime_cadence", "60"))))
-        countdown_count = QSpinBox()
-        countdown_count.setRange(3, 5)
-        countdown_count.setValue(int(self.db.get_setting("countdown_float_count", "3")))
-        manual_count = QSpinBox()
-        manual_count.setRange(0, 4)
-        manual_count.setValue(int(self.db.get_setting("manual_float_count", "3")))
-        shortcut = QComboBox()
-        shortcut.addItem("无快捷键", "none")
-        shortcut.addItem("Alt + E（建议）", "alt+e")
-        shortcut.setCurrentIndex(1 if self.db.get_setting("float_shortcut", "none") == "alt+e" else 0)
         try:
             greetings = json.loads(self.db.get_setting("saved_float_greetings", ""))
             if not isinstance(greetings, list):
@@ -567,86 +638,37 @@ class MainWindow(QMainWindow):
         except json.JSONDecodeError:
             greetings = []
         greetings = [text for text in greetings if isinstance(text, str) and text.strip()]
-        if self.db.get_setting("greetings_v161_seeded", "0") != "1":
-            greetings = [*self.DEFAULT_GREETINGS, *[text for text in greetings if text not in self.DEFAULT_GREETINGS]]
-            self.db.set_setting("saved_float_greetings", json.dumps(greetings, ensure_ascii=False))
-            self.db.set_setting("greetings_v161_seeded", "1")
-        greeting = QComboBox()
-        greeting.setEditable(True)
-        greeting.addItems(greetings)
-        saved_greeting = self.db.get_setting("float_greeting", greetings[0] if greetings else "")
-        greeting.setCurrentText(saved_greeting)
-        delete_greeting = QPushButton("删除当前鼓励语")
-        def remove_greeting() -> None:
-            index = greeting.currentIndex()
-            if index >= 0:
-                greeting.removeItem(index)
-        delete_greeting.clicked.connect(remove_greeting)
-        greeting_box = QHBoxLayout()
-        greeting_box.setContentsMargins(0, 0, 0, 0)
-        greeting_box.addWidget(greeting, 1)
-        greeting_box.addWidget(delete_greeting)
-        fixed_texts = []
-        for slot in range(1, 4):
-            edit = QLineEdit(self.db.get_setting(f"float_text_{slot}", ""))
-            edit.setPlaceholderText("没有指定事项时显示的固定文字")
-            fixed_texts.append((slot, edit))
-        def add_section(title: str) -> None:
-            if form.rowCount():
-                divider = QFrame()
-                divider.setFrameShape(QFrame.Shape.HLine)
-                divider.setStyleSheet("color:#d8dce2; margin-top:7px; margin-bottom:5px;")
-                form.addRow(divider)
-            section = QLabel(title)
-            section.setStyleSheet("font-size:13px; font-weight:700; color:#5c6673; padding-top:2px;")
-            form.addRow(section)
-
-        add_section("工作时间与启动")
-        form.addRow("下班时间", end_time)
-        form.addRow("", autostart)
-        add_section("提醒设置")
-        form.addRow("", offwork_enabled)
-        form.addRow("下班提醒时间", offwork_lead)
-        form.addRow("", water_enabled)
-        form.addRow("", overtime_enabled)
-        form.addRow("加班提醒频率", overtime_cadence)
-        add_section("鼓励语")
-        form.addRow("顶部鼓励语", greeting_box)
-        add_section("浮窗显示")
-        form.addRow("倒计时待办数量", countdown_count)
-        form.addRow("手动固定浮窗位数量", manual_count)
-        form.addRow("弹出快捷键", shortcut)
-        add_section("固定文字")
-        for slot, edit in fixed_texts:
-            form.addRow(f"浮窗位置 {slot} 固定文字", edit)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Save)
-        form.addRow(buttons)
-        buttons.rejected.connect(dialog.reject)
-        buttons.accepted.connect(dialog.accept)
-        countdown_count.valueChanged.connect(lambda value: self.refresh_float(value, manual_count.value()))
-        manual_count.valueChanged.connect(lambda value: self.refresh_float(countdown_count.value(), value))
+        dialog = SettingsDialog(self.db, greetings, self)
+        dialog.countdown_count.valueChanged.connect(
+            lambda value: self.refresh_float(value, dialog.manual_count.value())
+        )
+        dialog.manual_count.valueChanged.connect(
+            lambda value: self.refresh_float(dialog.countdown_count.value(), value)
+        )
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            chosen = greeting.currentText().strip()
-            values = [greeting.itemText(index).strip() for index in range(greeting.count()) if greeting.itemText(index).strip()]
-            if chosen and chosen not in values:
-                values.append(chosen)
-            chosen = chosen if chosen in values else (values[0] if values else "")
-            self.db.set_setting("off_work_time", end_time.time().toString("HH:mm"))
-            self.db.set_setting("autostart", "1" if autostart.isChecked() else "0")
-            self.db.set_setting("offwork_enabled", "1" if offwork_enabled.isChecked() else "0")
-            self.db.set_setting("offwork_lead_minutes", offwork_lead.currentData())
-            self.db.set_setting("water_enabled", "1" if water_enabled.isChecked() else "0")
-            self.db.set_setting("overtime_enabled", "1" if overtime_enabled.isChecked() else "0")
-            self.db.set_setting("overtime_cadence", overtime_cadence.currentData())
-            self.db.set_setting("saved_float_greetings", json.dumps(values, ensure_ascii=False))
-            self.db.set_setting("float_greeting", chosen)
-            self.db.set_setting("countdown_float_count", str(countdown_count.value()))
-            self.db.set_setting("manual_float_count", str(manual_count.value()))
-            self.db.set_setting("float_shortcut", shortcut.currentData())
-            for slot, edit in fixed_texts:
-                self.db.set_setting(f"float_text_{slot}", edit.text().strip())
-            self.set_autostart(autostart.isChecked())
-            if shortcut.currentData() != "none" and not self.apply_shortcut(shortcut.currentData()):
+            values = dialog.values()
+            self.db.set_setting("off_work_time", values["off_work_time"])
+            self.db.set_setting("autostart", "1" if values["autostart"] else "0")
+            self.db.set_setting("water_enabled", "1" if values["water_enabled"] else "0")
+            self.db.set_setting("water_custom_times", json.dumps(values["water_custom_times"]))
+            self.db.set_setting("meal_enabled", "1" if values["meal_enabled"] else "0")
+            self.db.set_setting("meal_times", json.dumps(values["meal_times"]))
+            self.db.set_setting("offwork_enabled", "1" if values["offwork_enabled"] else "0")
+            self.db.set_setting("offwork_lead_minutes_list", json.dumps(values["offwork_leads"]))
+            self.db.set_setting("offwork_lead_minutes", str(values["offwork_leads"][0] if values["offwork_leads"] else 5))
+            self.db.set_setting("overtime_enabled", "1" if values["overtime_enabled"] else "0")
+            self.db.set_setting("overtime_cadence", str(values["overtime_cadence"]))
+            self.db.set_setting("saved_float_greetings", json.dumps(values["greetings"], ensure_ascii=False))
+            self.db.set_setting("float_greeting", values["greeting"])
+            self.db.set_setting("countdown_float_count", str(values["countdown_count"]))
+            self.db.set_setting("manual_float_count", str(values["manual_count"]))
+            self.db.set_setting("float_shortcut", str(values["shortcut"]))
+            for slot, text in values["fixed_texts"].items():
+                self.db.set_setting(f"float_text_{slot}", text)
+            self.set_autostart(values["autostart"])
+            if self.hotkey_manager and values["shortcut"] == "none":
+                self.hotkey_manager.unregister()
+            elif values["shortcut"] != "none" and not self.apply_shortcut(values["shortcut"]):
                 self.show_notice("Alt + E 未能启用，可能正被其他软件占用。")
             self.render()
         else:

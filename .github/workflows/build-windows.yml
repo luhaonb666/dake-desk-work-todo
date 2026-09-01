@@ -29,6 +29,7 @@ jobs:
           --hidden-import app_paths --hidden-import services.hotkey
           --hidden-import storage.database --hidden-import ui.main_window
           --hidden-import ui.task_dialog --hidden-import ui.float_window
+          --hidden-import ui.settings_dialog --hidden-import ui.theme
           --name WorkTodo src/main.py
 
       - name: Install Inno Setup

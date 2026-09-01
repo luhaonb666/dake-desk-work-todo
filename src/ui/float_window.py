@@ -12,7 +12,9 @@ class FloatBadge(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setFixedWidth(27)
+        # A plain QWidget has no useful height hint on Windows. In V1.6.1 the
+        # layout compressed this badge to zero height, hiding every time value.
+        self.setFixedSize(27, 28)
         self.value = ""
         self.color = QColor("#64707e")
 
@@ -116,7 +118,7 @@ class FloatWindow(QWidget):
 
     def __init__(self) -> None:
         super().__init__(None)
-        self.setWindowTitle("工作待办 V1.6.1 · 浮窗")
+        self.setWindowTitle("工作待办 V2.1.0 · 浮窗")
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(self.EXPANDED_WIDTH)
@@ -153,12 +155,17 @@ class FloatWindow(QWidget):
         self.greeting.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.hide_button = QPushButton("收起 ›")
         self.hide_button.setMinimumSize(50, 26)
-        self.hide_button.setStyleSheet("border:none; color:#526172; background:transparent; padding:4px; font-size:12px;")
+        self.hide_button.setStyleSheet(
+            "QPushButton {background:#f3f5f7; border:1px solid #c9d1da; border-radius:9px; "
+            "color:#526172; padding:4px; font-size:12px; font-weight:600;} "
+            "QPushButton:hover {background:#ffffff; border-color:#aeb9c5;} "
+            "QPushButton:pressed {background:#e3e8ed;}"
+        )
         self.hide_button.clicked.connect(self.manual_collapse)
         header.addWidget(self.greeting, 1)
         header.addWidget(self.hide_button, 0, Qt.AlignmentFlag.AlignTop)
         self.layout.addLayout(header)
-        self.greeting.setFixedHeight(24)
+        self.greeting.setMinimumHeight(24)
         self._apply_header("", "default")
 
     def configure(self, greeting: str, countdown_count: int, manual_count: int, overtime_header: str = "") -> None:
@@ -177,7 +184,7 @@ class FloatWindow(QWidget):
             card.deleteLater()
         height = self.BASE_CARD_HEIGHT
         if wanted > self.MAX_UNCOMPRESSED_CARDS:
-            height = max(28, round(self.BASE_CARD_HEIGHT * self.MAX_UNCOMPRESSED_CARDS / wanted))
+            height = max(34, round(self.BASE_CARD_HEIGHT * self.MAX_UNCOMPRESSED_CARDS / wanted))
         for card in self._cards:
             card.set_density(height)
         # Shrink immediately when fewer cards are displayed; otherwise the header
@@ -187,19 +194,31 @@ class FloatWindow(QWidget):
 
     def _apply_header(self, text: str, mode: str) -> None:
         if mode == "alert":
-            background = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #fff4ad,stop:0.46 #d9a72e,stop:0.54 #fff8c8,stop:1 #b67b0d)"
+            background = "qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #fff8c8,stop:0.46 #d9a72e,stop:0.54 #fff4ad,stop:1 #b67b0d)"
             border, color, width = "#9f6800", "#4d3600", 2
         elif mode == "overtime":
-            background = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #edf2f6,stop:0.45 #aebbc8,stop:0.54 #f7f9fb,stop:1 #94a3b2)"
+            background = "qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #f7f9fb,stop:0.45 #aebbc8,stop:0.54 #edf2f6,stop:1 #94a3b2)"
             border, color, width = "#8695a5", "#334455", 1
         else:
-            background = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #f1f4f7,stop:0.44 #b9c4cf,stop:0.53 #ffffff,stop:1 #9eabb8)"
+            background = "qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #ffffff,stop:0.44 #b9c4cf,stop:0.53 #f1f4f7,stop:1 #9eabb8)"
             border, color, width = "#8998a7", "#334455", 1
         self.greeting.setText(text)
+        self._resize_header_for_text(text)
         self.greeting.setStyleSheet(
             f"background:{background}; border:{width}px solid {border}; border-radius:10px; "
             f"font-size:12px; font-weight:700; color:{color}; padding:3px 6px;"
         )
+
+    def _resize_header_for_text(self, text: str) -> None:
+        """Keep short encouragement compact, but never crop a long reminder."""
+        logical_lines = text.splitlines() or [""]
+        visual_lines = sum(max(1, (len(line) + 10) // 11) for line in logical_lines)
+        height = 24 if visual_lines == 1 else min(96, 12 + visual_lines * 16)
+        self.greeting.setFixedHeight(height)
+        # Recalculate the frameless top-level window as the header expands or
+        # returns to normal after a temporary reminder.
+        self.adjustSize()
+        self.resize(self.width(), self.sizeHint().height())
 
     def _restore_header(self) -> None:
         if self._overtime_header:

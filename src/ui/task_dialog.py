@@ -19,6 +19,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from ui.theme import APP_STYLE
+
 
 class TitleEditor(QPlainTextEdit):
     next_field_requested = pyqtSignal()
@@ -38,23 +40,10 @@ class TaskDialog(QDialog):
     def __init__(self, task=None, parent=None) -> None:
         super().__init__(parent)
         self.task = task
+        self.setObjectName("taskDialog")
         self.setWindowTitle("编辑事项" if task else "添加事项")
         self.setMinimumWidth(470)
-        self.setStyleSheet(
-            """
-            QDialog { background:#fbf9ff; color:#4b4658; }
-            QLabel { color:#5f586e; }
-            QPlainTextEdit, QTextEdit, QDateEdit, QComboBox {
-                background:#ffffff; border:1px solid #e2d9f0; border-radius:11px;
-                padding:7px; selection-background-color:#cdbdec;
-            }
-            QPlainTextEdit:focus, QTextEdit:focus, QDateEdit:focus, QComboBox:focus {
-                border:2px solid #ab93dc;
-            }
-            QPushButton { background:#ffffff; border:1px solid #ddd3ed; border-radius:11px; padding:7px 14px; }
-            QPushButton:hover { background:#f2edfc; }
-            """
-        )
+        self.setStyleSheet(APP_STYLE + "QDialog#taskDialog { background:#f7f9fc; }")
         layout = QVBoxLayout(self)
         form = QFormLayout()
         self.title_edit = TitleEditor()
@@ -81,7 +70,7 @@ class TaskDialog(QDialog):
         self.time_enabled = QCheckBox("有具体时间")
         self.time_enabled.setChecked(bool(task and task["due_time"]))
         self.hour_combo = QComboBox()
-        for hour in range(8, 23):
+        for hour in range(7, 23):
             self.hour_combo.addItem(f"{hour:02d} 时", hour)
         self.minute_combo = QComboBox()
         for minute in range(0, 60, 10):
@@ -98,7 +87,7 @@ class TaskDialog(QDialog):
                 minute_index = self.minute_combo.count() - 1
             self.minute_combo.setCurrentIndex(minute_index)
         else:
-            next_hour = min(22, max(8, QTime.currentTime().hour() + 1))
+            next_hour = min(22, max(7, QTime.currentTime().hour() + 1))
             self.hour_combo.setCurrentIndex(self.hour_combo.findData(next_hour))
         self.hour_combo.activated.connect(lambda _: self.time_enabled.setChecked(True))
         self.minute_combo.activated.connect(lambda _: self.time_enabled.setChecked(True))
@@ -118,6 +107,9 @@ class TaskDialog(QDialog):
         form.addRow("", self.fixed_check)
         layout.addLayout(form)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Save)
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存")
+        buttons.button(QDialogButtonBox.StandardButton.Save).setObjectName("primaryButton")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)

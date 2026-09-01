@@ -27,6 +27,8 @@ pyinstaller --noconfirm --clean --windowed --onefile --paths src ^
   --hidden-import ui.main_window ^
   --hidden-import ui.task_dialog ^
   --hidden-import ui.float_window ^
+  --hidden-import ui.settings_dialog ^
+  --hidden-import ui.theme ^
   --name WorkTodo src\main.py
 if errorlevel 1 (
   echo Program build failed. Please keep this window open and send the error text or screenshot.
