@@ -92,7 +92,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.db = Database(app_data_dir() / "work-todo.db")
         self.db.ensure_settings_table()
-        self.setWindowTitle("工作待办 V1.3")
+        self.setWindowTitle("工作待办 V1.4")
         self.setWindowIcon(app_icon())
         self.resize(760, 760)
         self.setMinimumSize(570, 520)
@@ -123,16 +123,24 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(22, 18, 22, 18)
         outer.setSpacing(12)
         header = QHBoxLayout()
-        title = QLabel("工作待办 V1.3")
+        title = QLabel("工作待办 V1.4")
         title.setStyleSheet("font-size:26px; font-weight:700; color:#1f2937;")
         self.header_greeting = QLabel()
         self.header_greeting.setWordWrap(True)
+        self.header_greeting.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.header_greeting.setStyleSheet(
             "background:#f1edf9; border:1px solid #ded4ed; border-radius:10px; color:#66527f; "
             "font-size:13px; font-weight:600; padding:5px 9px;"
         )
         header.addWidget(title)
-        header.addWidget(self.header_greeting, 1)
+        greeting_column = QVBoxLayout()
+        greeting_column.setSpacing(3)
+        greeting_column.addWidget(self.header_greeting)
+        self.precise_overtime = QLabel()
+        self.precise_overtime.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.precise_overtime.setStyleSheet("font-size:12px; color:#876b43; font-weight:600;")
+        greeting_column.addWidget(self.precise_overtime)
+        header.addLayout(greeting_column, 1)
         self.float_button = QPushButton("关闭桌面浮窗")
         self.float_button.clicked.connect(self.toggle_float)
         header.addWidget(self.float_button)
@@ -146,10 +154,7 @@ class MainWindow(QMainWindow):
         details = QHBoxLayout()
         self.subtitle = QLabel()
         self.subtitle.setStyleSheet("font-size:13px; color:#7a8491;")
-        self.precise_overtime = QLabel()
-        self.precise_overtime.setStyleSheet("font-size:12px; color:#876b43; font-weight:600;")
         details.addWidget(self.subtitle)
-        details.addWidget(self.precise_overtime)
         details.addStretch()
         outer.addLayout(details)
         self.notice = QLabel()
@@ -207,7 +212,7 @@ class MainWindow(QMainWindow):
 
     def _build_tray(self) -> None:
         self.tray = QSystemTrayIcon(self.windowIcon(), self)
-        self.tray.setToolTip("工作待办 V1.3")
+        self.tray.setToolTip("工作待办 V1.4")
         menu = QMenu(self)
         open_action = QAction("打开编辑主窗", self)
         open_action.triggered.connect(self.show_editor)
@@ -284,7 +289,9 @@ class MainWindow(QMainWindow):
             self.list_layout.addStretch(1)
             self.refresh_float()
             return
-        normal = [task for task in tasks if not task["is_fixed"]]
+        # A timed pinned task deliberately appears in both sections: today gives
+        # it chronological context, while the second copy keeps it visibly pinned.
+        normal = tasks
         fixed = [task for task in tasks if task["is_fixed"]]
         if normal:
             self.list_layout.addWidget(self.section_label("今日事项"))
@@ -375,7 +382,7 @@ class MainWindow(QMainWindow):
         manual_count = manual_count if manual_count is not None else int(self.db.get_setting("manual_float_count", "3"))
         greeting = self.db.get_setting("float_greeting", self.DEFAULT_GREETINGS[0])
         self.float_window.configure(greeting, countdown_count, manual_count, self._overtime_header(now))
-        scheduled = [task for task in self.db.tasks_for(self.db.today(), pending_only=True) if not task["is_fixed"] and task["due_time"]]
+        scheduled = [task for task in self.db.tasks_for(self.db.today(), pending_only=True) if task["due_time"]]
         past, future = [], []
         for task in scheduled:
             due = datetime.strptime(f"{task['task_date']} {task['due_time']}", "%Y-%m-%d %H:%M")

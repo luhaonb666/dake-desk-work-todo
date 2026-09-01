@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QDate, Qt, pyqtSignal
+from PyQt6.QtCore import QDate, QTime, Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -81,13 +81,25 @@ class TaskDialog(QDialog):
         self.time_enabled = QCheckBox("有具体时间")
         self.time_enabled.setChecked(bool(task and task["due_time"]))
         self.hour_combo = QComboBox()
-        self.hour_combo.addItems([f"{hour:02d} 时" for hour in range(24)])
+        for hour in range(8, 23):
+            self.hour_combo.addItem(f"{hour:02d} 时", hour)
         self.minute_combo = QComboBox()
-        self.minute_combo.addItems([f"{minute:02d} 分" for minute in range(0, 60, 15)])
+        for minute in range(0, 60, 10):
+            self.minute_combo.addItem(f"{minute:02d} 分", minute)
         if task and task["due_time"]:
             hour, minute = task["due_time"].split(":")
-            self.hour_combo.setCurrentIndex(int(hour))
-            self.minute_combo.setCurrentIndex(int(minute) // 15)
+            self.hour_combo.setCurrentIndex(max(0, self.hour_combo.findData(int(hour))))
+            minute_index = self.minute_combo.findData(int(minute))
+            # Existing V1.3 tasks may have a 15-minute value. Keep that exact
+            # value when merely opening and saving the editor; new choices remain
+            # on the V1.4 ten-minute grid.
+            if minute_index < 0:
+                self.minute_combo.addItem(f"{int(minute):02d} 分（原时间）", int(minute))
+                minute_index = self.minute_combo.count() - 1
+            self.minute_combo.setCurrentIndex(minute_index)
+        else:
+            next_hour = min(22, max(8, QTime.currentTime().hour() + 1))
+            self.hour_combo.setCurrentIndex(self.hour_combo.findData(next_hour))
         self.hour_combo.activated.connect(lambda _: self.time_enabled.setChecked(True))
         self.minute_combo.activated.connect(lambda _: self.time_enabled.setChecked(True))
         time_box = QHBoxLayout()
@@ -97,7 +109,7 @@ class TaskDialog(QDialog):
         time_box.addWidget(self.minute_combo)
         time_box.addStretch()
 
-        self.fixed_check = QCheckBox("固定待办（显示在当天列表最底部）")
+        self.fixed_check = QCheckBox("固定钉住待办（显示在当天列表最底部）")
         self.fixed_check.setChecked(bool(task and task["is_fixed"]))
         form.addRow("事项", title_box)
         form.addRow("说明", self.notes_edit)
@@ -114,7 +126,7 @@ class TaskDialog(QDialog):
     def values(self) -> dict:
         due_time = None
         if self.time_enabled.isChecked():
-            due_time = f"{self.hour_combo.currentIndex():02d}:{self.minute_combo.currentIndex() * 15:02d}"
+            due_time = f"{self.hour_combo.currentData():02d}:{self.minute_combo.currentData():02d}"
         return {
             "title": self.title_edit.toPlainText().strip(),
             "notes": self.notes_edit.toPlainText().strip(),

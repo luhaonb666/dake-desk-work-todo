@@ -12,13 +12,13 @@ class FloatCard(QFrame):
     def __init__(self) -> None:
         super().__init__()
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 6, 9, 6)
-        layout.setSpacing(6)
+        layout.setContentsMargins(5, 3, 6, 3)
+        layout.setSpacing(3)
         self.badge = QLabel()
-        self.badge.setFixedWidth(31)
-        self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignTop)
+        self.badge.setFixedWidth(20)
+        self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
         self.text = QLabel()
-        self.text.setWordWrap(True)
+        self.text.setWordWrap(False)
         layout.addWidget(self.badge, 0, Qt.AlignmentFlag.AlignTop)
         layout.addWidget(self.text, 1)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -28,22 +28,25 @@ class FloatCard(QFrame):
         self.setMaximumHeight(height)
 
     def update_card(self, badge: str, text: str, *, kind: str, highlighted: bool = False) -> None:
+        manual_break = "\n" in text
         if highlighted:
-            background, border, badge_color = "#fffdf8", "#ead9a7", "#9a7a31"
+            background, border, badge_color = "#ffffff", "#438bd0", "#1766ab"
         elif kind == "countdown":
             background, border, badge_color = "#fff7e8", "#f2d5a7", "#9a6d24"
         else:
             background, border, badge_color = "#f5f7fa", "#dce3eb", "#64707e"
-        compact = "\n" in text or len(text) > 14
-        font_size = 12 if compact else 14
+        font_size = 11 if manual_break else 14
         self.setStyleSheet(
-            f"background:{background}; border:1px solid {border}; border-radius:13px; color:#3e4854;"
+            f"background:{background}; border:{'3' if highlighted else '1'}px solid {border}; border-radius:13px; color:#3e4854;"
         )
         self.badge.setText(badge)
         self.badge.setStyleSheet(
-            f"border:none; background:transparent; color:{badge_color}; font-size:11px; font-weight:700; padding-top:2px;"
+            f"border:none; background:transparent; color:{badge_color}; font-size:10px; font-weight:700;"
         )
-        self.text.setText(text or "暂无固定内容")
+        shown = text
+        if not manual_break and len(text) > 12:
+            shown = text[:11] + "…"
+        self.text.setText(shown or "暂无固定内容")
         self.text.setStyleSheet(
             f"border:none; background:transparent; color:#3e4854; font-size:{font_size}px; font-weight:600;"
         )
@@ -91,13 +94,13 @@ class FloatWindow(QWidget):
         self.greeting.setWordWrap(True)
         self.greeting.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.hide_button = QPushButton("收起 ›")
-        self.hide_button.setStyleSheet(
-            "border:none; color:#81758c; background:transparent; padding:2px; font-size:11px;"
-        )
+        self.hide_button.setMinimumSize(50, 26)
+        self.hide_button.setStyleSheet("border:none; color:#526172; background:transparent; padding:4px; font-size:12px;")
         self.hide_button.clicked.connect(self.manual_collapse)
         header.addWidget(self.greeting, 1)
         header.addWidget(self.hide_button, 0, Qt.AlignmentFlag.AlignTop)
         self.layout.addLayout(header)
+        self.greeting.setFixedHeight(24)
         self._apply_header("", "default")
 
     def configure(self, greeting: str, countdown_count: int, manual_count: int, overtime_header: str = "") -> None:
@@ -119,18 +122,22 @@ class FloatWindow(QWidget):
             height = max(28, round(self.BASE_CARD_HEIGHT * self.MAX_UNCOMPRESSED_CARDS / wanted))
         for card in self._cards:
             card.set_density(height)
+        # Shrink immediately when fewer cards are displayed; otherwise the header
+        # receives the old spare height and turns into the large blank box shown in V1.3.
+        self.adjustSize()
+        self.resize(self.width(), self.sizeHint().height())
 
     def _apply_header(self, text: str, mode: str) -> None:
         if mode == "alert":
             background, border, color = "#fffbea", "#ead7a2", "#806628"
         elif mode == "overtime":
-            background, border, color = "#f1edf9", "#d8cdea", "#66527f"
+            background, border, color = "#e7edf3", "#aab8c7", "#435365"
         else:
-            background, border, color = "#f5f3f8", "#e3ddec", "#6f637c"
+            background, border, color = "#e8edf2", "#b7c2cd", "#435365"
         self.greeting.setText(text)
         self.greeting.setStyleSheet(
             f"background:{background}; border:1px solid {border}; border-radius:10px; "
-            f"font-size:12px; font-weight:700; color:{color}; padding:5px 6px;"
+            f"font-size:12px; font-weight:700; color:{color}; padding:3px 6px;"
         )
 
     def _restore_header(self) -> None:
