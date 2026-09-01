@@ -6,8 +6,6 @@ from PyQt6.QtCore import QDate, QTime, Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QCheckBox,
-    QComboBox,
-    QDateEdit,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -19,6 +17,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from ui.controls import NoWheelComboBox, NoWheelDateEdit
 from ui.theme import APP_STYLE
 
 
@@ -61,7 +60,7 @@ class TaskDialog(QDialog):
         self.notes_edit.setFixedHeight(100)
         self.title_edit.next_field_requested.connect(self.notes_edit.setFocus)
 
-        self.date_edit = QDateEdit()
+        self.date_edit = NoWheelDateEdit()
         self.date_edit.setCalendarPopup(True)
         self.date_edit.setDisplayFormat("yyyy 年 MM 月 dd 日")
         selected = QDate.fromString(task["task_date"], "yyyy-MM-dd") if task else QDate.currentDate()
@@ -69,10 +68,10 @@ class TaskDialog(QDialog):
 
         self.time_enabled = QCheckBox("有具体时间")
         self.time_enabled.setChecked(bool(task and task["due_time"]))
-        self.hour_combo = QComboBox()
+        self.hour_combo = NoWheelComboBox()
         for hour in range(7, 23):
             self.hour_combo.addItem(f"{hour:02d} 时", hour)
-        self.minute_combo = QComboBox()
+        self.minute_combo = NoWheelComboBox()
         for minute in range(0, 60, 10):
             self.minute_combo.addItem(f"{minute:02d} 分", minute)
         if task and task["due_time"]:
@@ -100,11 +99,16 @@ class TaskDialog(QDialog):
 
         self.fixed_check = QCheckBox("固定钉住待办（显示在当天列表最底部）")
         self.fixed_check.setChecked(bool(task and task["is_fixed"]))
+        self.duplicate_check = QCheckBox("新增复制该条事件卡")
+        self.duplicate_check.setToolTip("保留原事项不变，再新建一条可独立修改的记录")
+        self.duplicate_check.setVisible(bool(task))
         form.addRow("事项", title_box)
         form.addRow("说明", self.notes_edit)
         form.addRow("日期", self.date_edit)
         form.addRow("时间", time_box)
         form.addRow("", self.fixed_check)
+        if task:
+            form.addRow("", self.duplicate_check)
         layout.addLayout(form)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Save)
         buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存")
@@ -126,6 +130,9 @@ class TaskDialog(QDialog):
             "due_time": due_time,
             "is_fixed": self.fixed_check.isChecked(),
         }
+
+    def duplicate_requested(self) -> bool:
+        return not self.duplicate_check.isHidden() and self.duplicate_check.isChecked()
 
     def accept(self) -> None:
         if not self.title_edit.toPlainText().strip():

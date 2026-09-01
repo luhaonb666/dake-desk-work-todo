@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QPoint, QPropertyAnimation, QRect, QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PyQt6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 
@@ -14,7 +14,7 @@ class FloatBadge(QWidget):
         super().__init__()
         # A plain QWidget has no useful height hint on Windows. In V1.6.1 the
         # layout compressed this badge to zero height, hiding every time value.
-        self.setFixedSize(27, 28)
+        self.setFixedSize(23, 28)
         self.value = ""
         self.color = QColor("#64707e")
 
@@ -23,6 +23,9 @@ class FloatBadge(QWidget):
         self.color = QColor(color)
         self.update()
 
+    def set_badge_height(self, height: int) -> None:
+        self.setFixedSize(23, max(26, height))
+
     def paintEvent(self, event):  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -30,19 +33,35 @@ class FloatBadge(QWidget):
         if ":" in self.value:
             hour, minute = self.value.split(":", 1)
             font = QFont(self.font())
-            font.setPointSize(8)
-            font.setBold(True)
+            font.setPixelSize(10)
+            font.setWeight(QFont.Weight.DemiBold)
             painter.setFont(font)
-            painter.drawText(QRect(0, 0, 19, self.height() // 2 + 4), Qt.AlignmentFlag.AlignLeft, hour)
-            painter.drawText(QRect(7, self.height() // 2 - 4, 20, self.height() // 2 + 4), Qt.AlignmentFlag.AlignRight, minute)
+            half = self.height() // 2
+            # Keep the time vertical and narrow. The minute is only three pixels
+            # to the right of the hour: the subtle hand-drawn stagger requested
+            # for the badge, without consuming title space.
+            painter.drawText(
+                QRect(0, 1, self.width() - 3, half - 2),
+                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
+                hour,
+            )
+            painter.drawText(
+                QRect(3, half + 1, self.width() - 3, self.height() - half - 2),
+                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
+                minute,
+            )
             painter.setPen(QPen(self.color, 1))
-            painter.drawLine(11, self.height() // 2 + 3, 17, self.height() // 2 - 3)
+            painter.drawLine(7, half, 15, half)
         else:
             font = QFont(self.font())
-            font.setPointSize(12)
-            font.setBold(True)
+            font.setPixelSize(13)
+            font.setWeight(QFont.Weight.DemiBold)
             painter.setFont(font)
-            painter.drawText(QRect(0, 1, self.width(), self.height() // 2 + 8), Qt.AlignmentFlag.AlignHCenter, self.value)
+            painter.drawText(
+                QRect(0, 1, self.width(), max(16, self.height() // 2 + 5)),
+                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
+                self.value,
+            )
         painter.end()
 
 
@@ -57,7 +76,7 @@ class FloatCard(QFrame):
         self.badge = FloatBadge()
         self.text = QLabel()
         self.text.setWordWrap(False)
-        layout.addWidget(self.badge, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(self.badge, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(self.text, 1)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._kind = "manual"
@@ -69,6 +88,7 @@ class FloatCard(QFrame):
     def set_density(self, height: int) -> None:
         self.setMinimumHeight(height)
         self.setMaximumHeight(height)
+        self.badge.set_badge_height(height - 6)
 
     def update_card(self, badge: str, text: str, *, kind: str, highlighted: bool = False) -> None:
         manual_break = "\n" in text
@@ -82,7 +102,7 @@ class FloatCard(QFrame):
             shown = text[:11] + "…"
         self.text.setText(shown or "暂无固定内容")
         self.text.setStyleSheet(
-            f"border:none; background:transparent; color:#3e4854; font-size:{font_size}px; font-weight:600;"
+            f"border:none; background:transparent; color:#3e4854; font-size:{font_size}px; font-weight:500;"
         )
         self._apply_style()
 
@@ -118,7 +138,7 @@ class FloatWindow(QWidget):
 
     def __init__(self) -> None:
         super().__init__(None)
-        self.setWindowTitle("工作待办 V2.1.0 · 浮窗")
+        self.setWindowTitle("工作待办 V2.2.0 · 浮窗")
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(self.EXPANDED_WIDTH)
@@ -144,6 +164,8 @@ class FloatWindow(QWidget):
         self._pulse_step = 0
         self._pulse_header = False
         self._alert_message = ""
+        self._header_font_px = 12
+        self._header_mode = "default"
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(6, 6, 6, 6)
@@ -202,18 +224,48 @@ class FloatWindow(QWidget):
         else:
             background = "qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #ffffff,stop:0.44 #b9c4cf,stop:0.53 #f1f4f7,stop:1 #9eabb8)"
             border, color, width = "#8998a7", "#334455", 1
+        self._header_mode = mode
         self.greeting.setText(text)
-        self._resize_header_for_text(text)
+        self._resize_header_for_text(text, strict_two_lines=mode in {"alert", "overtime"})
         self.greeting.setStyleSheet(
             f"background:{background}; border:{width}px solid {border}; border-radius:10px; "
-            f"font-size:12px; font-weight:700; color:{color}; padding:3px 6px;"
+            f"font-size:{self._header_font_px}px; font-weight:600; color:{color}; padding:3px 6px;"
         )
 
-    def _resize_header_for_text(self, text: str) -> None:
+    def _resize_header_for_text(self, text: str, *, strict_two_lines: bool = False) -> None:
         """Keep short encouragement compact, but never crop a long reminder."""
         logical_lines = text.splitlines() or [""]
-        visual_lines = sum(max(1, (len(line) + 10) // 11) for line in logical_lines)
-        height = 24 if visual_lines == 1 else min(96, 12 + visual_lines * 16)
+        available_width = max(80, self.EXPANDED_WIDTH - 6 * 2 - 50 - 4 - 14)
+        font_px = 12
+        if strict_two_lines:
+            # Reminder text is authored as exactly two lines. Measure the actual
+            # installed font (including Windows 125% DPI) and shrink only enough
+            # to keep either line from being wrapped by QLabel.
+            while font_px > 9:
+                font = QFont(self.greeting.font())
+                font.setPixelSize(font_px)
+                font.setWeight(QFont.Weight.DemiBold)
+                if max(QFontMetrics(font).horizontalAdvance(line) for line in logical_lines) <= available_width:
+                    break
+                font_px -= 1
+            self.greeting.setWordWrap(False)
+            font = QFont(self.greeting.font())
+            font.setPixelSize(font_px)
+            font.setWeight(QFont.Weight.DemiBold)
+            line_height = QFontMetrics(font).height()
+            height = max(38, 8 + line_height * len(logical_lines))
+        else:
+            self.greeting.setWordWrap(True)
+            font = QFont(self.greeting.font())
+            font.setPixelSize(font_px)
+            font.setWeight(QFont.Weight.DemiBold)
+            bounds = QFontMetrics(font).boundingRect(
+                QRect(0, 0, available_width, 120),
+                int(Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap),
+                text,
+            )
+            height = max(24, min(96, bounds.height() + 8))
+        self._header_font_px = font_px
         self.greeting.setFixedHeight(height)
         # Recalculate the frameless top-level window as the header expands or
         # returns to normal after a temporary reminder.
@@ -321,7 +373,7 @@ class FloatWindow(QWidget):
             if on:
                 self.greeting.setStyleSheet(
                     "background:#fff9d7; border:3px solid #c38808; border-radius:10px; "
-                    "font-size:12px; font-weight:700; color:#4d3600; padding:2px 5px;"
+                    f"font-size:{self._header_font_px}px; font-weight:600; color:#4d3600; padding:2px 5px;"
                 )
             else:
                 self._apply_header(self._alert_message, "alert")

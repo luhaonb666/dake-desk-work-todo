@@ -8,7 +8,6 @@ from datetime import datetime
 from PyQt6.QtCore import QSignalBlocker, QTime, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFrame,
@@ -21,13 +20,12 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
-    QSpinBox,
-    QTimeEdit,
     QVBoxLayout,
     QWidget,
     QWidgetAction,
 )
 
+from ui.controls import NoWheelComboBox, NoWheelSpinBox, NoWheelTimeEdit
 from ui.theme import SETTINGS_STYLE
 
 
@@ -44,6 +42,7 @@ class GuidedTimeCombo(QPushButton):
         self.setObjectName("timeSlotButton")
         self.setText(self._value or "无")
         self.setMinimumWidth(78)
+        self.setProperty("selected", bool(self._value))
         self.clicked.connect(self._open_picker)
 
     @classmethod
@@ -63,11 +62,15 @@ class GuidedTimeCombo(QPushButton):
 
     def set_value(self, value: str) -> None:
         value = value if self._valid_value(value) else ""
-        if value == self._value:
-            return
+        changed = value != self._value
         self._value = value
         self.setText(value or "无")
-        self.valueChanged.emit(value)
+        self.setProperty("selected", bool(value))
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+        if changed:
+            self.valueChanged.emit(value)
 
     def _open_picker(self) -> None:
         menu = QMenu(self)
@@ -80,10 +83,10 @@ class GuidedTimeCombo(QPushButton):
         no_time.setChecked(not bool(self._value))
         layout.addWidget(no_time)
         time_row = QHBoxLayout()
-        hour_combo = QComboBox()
+        hour_combo = NoWheelComboBox()
         for hour in self.HOURS:
             hour_combo.addItem(f"{hour:02d} 时", hour)
-        minute_combo = QComboBox()
+        minute_combo = NoWheelComboBox()
         for minute in self.MINUTES:
             minute_combo.addItem(f"{minute:02d} 分", minute)
         if self._value:
@@ -95,9 +98,10 @@ class GuidedTimeCombo(QPushButton):
         time_row.addWidget(hour_combo)
         time_row.addWidget(minute_combo)
         layout.addLayout(time_row)
-        no_time.toggled.connect(lambda checked: (hour_combo.setDisabled(checked), minute_combo.setDisabled(checked)))
-        hour_combo.setDisabled(no_time.isChecked())
-        minute_combo.setDisabled(no_time.isChecked())
+        # The selectors stay usable while "无" is checked. Choosing either
+        # selector is an explicit time-setting action, so "无" is cleared.
+        hour_combo.activated.connect(lambda _: no_time.setChecked(False))
+        minute_combo.activated.connect(lambda _: no_time.setChecked(False))
         actions = QHBoxLayout()
         cancel = QPushButton("取消")
         confirm = QPushButton("确定")
@@ -168,7 +172,7 @@ class SettingsDialog(QDialog):
         self.db = db
         self.setObjectName("settingsDialog")
         self.setWindowTitle("设置")
-        self.resize(820, 720)
+        self.resize(720, 720)
         self.setMinimumSize(680, 580)
         self.setStyleSheet(SETTINGS_STYLE)
 
@@ -198,6 +202,7 @@ class SettingsDialog(QDialog):
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         root.addWidget(self.buttons)
+        self._initial_state = self._comparison_state()
 
     @staticmethod
     def _row_label(text: str, width: int = 112) -> QLabel:
@@ -235,7 +240,7 @@ class SettingsDialog(QDialog):
 
     def _build_work_section(self) -> None:
         section = SettingsSection("工作与启动")
-        self.end_time = QTimeEdit()
+        self.end_time = NoWheelTimeEdit()
         self.end_time.setDisplayFormat("HH:mm")
         self.end_time.setTime(QTime.fromString(self.db.get_setting("off_work_time", "18:10"), "HH:mm"))
         self.end_time.setMinimumWidth(150)
@@ -248,15 +253,27 @@ class SettingsDialog(QDialog):
         section = SettingsSection("提醒")
 
         self.water_enabled = QCheckBox("喝水提醒")
-        self.water_enabled.setMinimumWidth(112)
+        self.water_enabled.setMinimumWidth(92)
         self.water_enabled.setChecked(self.db.get_setting("water_enabled", "1") == "1")
+        selected_fixed = set(self._load_json_list(
+            self.db.get_setting("water_fixed_times", ""), list(self.FIXED_WATER_TIMES)
+        ))
+        self.water_fixed_buttons = []
         fixed_water = []
         for value in self.FIXED_WATER_TIMES:
-            label = QLabel(value)
-            label.setObjectName("fixedChip")
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            label.setMinimumWidth(56)
-            fixed_water.append(label)
+            column = QWidget()
+            column_layout = QVBoxLayout(column)
+            column_layout.setContentsMargins(0, 0, 0, 0)
+            column_layout.setSpacing(1)
+            egg = QLabel("饮茶时间！" if value == "15:15" else " ")
+            egg.setObjectName("easterEgg")
+            egg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            button = self._choice(value, value in selected_fixed)
+            button.setMinimumWidth(56)
+            self.water_fixed_buttons.append(button)
+            column_layout.addWidget(egg)
+            column_layout.addWidget(button)
+            fixed_water.append(column)
         custom_values = self._load_json_list(self.db.get_setting("water_custom_times", ""), ["", "", ""])
         custom_values = (custom_values + ["", "", ""])[:3]
         self.water_custom = [GuidedTimeCombo(value) for value in custom_values]
@@ -291,7 +308,7 @@ class SettingsDialog(QDialog):
         self.overtime_enabled.setChecked(self.db.get_setting("overtime_enabled", "1") == "1")
         cadence_label = QLabel("频率")
         cadence_label.setObjectName("rowLabel")
-        self.overtime_cadence = QComboBox()
+        self.overtime_cadence = NoWheelComboBox()
         self.overtime_cadence.addItem("每半小时", "30")
         self.overtime_cadence.addItem("每1小时", "60")
         cadence = self.db.get_setting("overtime_cadence", "30")
@@ -302,7 +319,7 @@ class SettingsDialog(QDialog):
 
     def _build_greeting_section(self, greetings: list[str]) -> None:
         section = SettingsSection("顶部鼓励语")
-        self.greeting = QComboBox()
+        self.greeting = NoWheelComboBox()
         self.greeting.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.greeting.addItems(greetings)
         saved = self.db.get_setting("float_greeting", greetings[0] if greetings else "")
@@ -322,17 +339,17 @@ class SettingsDialog(QDialog):
 
     def _build_float_section(self) -> None:
         section = SettingsSection("浮窗显示数量调节")
-        self.countdown_count = QSpinBox()
+        self.countdown_count = NoWheelSpinBox()
         self.countdown_count.setRange(3, 5)
         self.countdown_count.setValue(int(self.db.get_setting("countdown_float_count", "3")))
         self.countdown_count.setMinimumWidth(90)
-        self.manual_count = QSpinBox()
+        self.manual_count = NoWheelSpinBox()
         self.manual_count.setRange(0, 4)
         self.manual_count.setValue(int(self.db.get_setting("manual_float_count", "3")))
         self.manual_count.setMinimumWidth(90)
         section.add_row(self._row(self._row_label("倒计时待办数量", 150), self.countdown_count))
         section.add_row(self._row(self._row_label("手动固定浮窗位数量", 150), self.manual_count), divider=True)
-        self.shortcut = QComboBox()
+        self.shortcut = NoWheelComboBox()
         self.shortcut.addItem("无快捷键", "none")
         self.shortcut.addItem("Alt + E（建议）", "alt+e")
         current = self.db.get_setting("float_shortcut", "none")
@@ -397,6 +414,10 @@ class SettingsDialog(QDialog):
             "off_work_time": self.end_time.time().toString("HH:mm"),
             "autostart": self.autostart.isChecked(),
             "water_enabled": self.water_enabled.isChecked(),
+            "water_fixed_times": [
+                value for value, button in zip(self.FIXED_WATER_TIMES, self.water_fixed_buttons)
+                if button.isChecked()
+            ],
             "water_custom_times": [combo.currentData() or "" for combo in self.water_custom],
             "meal_enabled": self.meal_enabled.isChecked(),
             "meal_times": [value for value, button in zip(self.MEAL_TIMES, self.meal_buttons) if button.isChecked()],
@@ -413,3 +434,39 @@ class SettingsDialog(QDialog):
             "shortcut": self.shortcut.currentData(),
             "fixed_texts": {slot: edit.text().strip() for slot, edit in self.fixed_texts},
         }
+
+    def _comparison_state(self) -> str:
+        state = self.values()
+        state["custom_greeting_draft"] = self.custom_greeting.toPlainText()
+        return json.dumps(state, ensure_ascii=False, sort_keys=True)
+
+    def accept(self) -> None:
+        # A typed custom greeting is part of the settings form. Saving the form
+        # must not silently discard it just because its adjacent button was not
+        # clicked first.
+        if self.custom_greeting.toPlainText().strip():
+            self._save_custom_greeting()
+        super().accept()
+
+    def reject(self) -> None:
+        if not hasattr(self, "_initial_state") or self._comparison_state() == self._initial_state:
+            super().reject()
+            return
+        prompt = QMessageBox(self)
+        prompt.setWindowTitle("设置尚未保存")
+        prompt.setText("设置没有保存，是否立即保存？")
+        prompt.setIcon(QMessageBox.Icon.Warning)
+        prompt.setStandardButtons(
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel
+        )
+        prompt.button(QMessageBox.StandardButton.Save).setText("立即保存")
+        prompt.button(QMessageBox.StandardButton.Discard).setText("不保存")
+        prompt.button(QMessageBox.StandardButton.Cancel).setText("返回设置")
+        prompt.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        result = prompt.exec()
+        if result == QMessageBox.StandardButton.Save:
+            self.accept()
+        elif result == QMessageBox.StandardButton.Discard:
+            QDialog.reject(self)

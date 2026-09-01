@@ -1,4 +1,4 @@
-"""Work Todo V2.1.0 application entry point."""
+"""Work Todo V2.2.0 application entry point."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import QApplication, QMessageBox
 from app_paths import configure_logging
 from services.hotkey import GlobalHotkey
 from ui.main_window import MainWindow
+from ui.theme import configure_application_font
 
 
 def install_exception_hook() -> None:
@@ -33,6 +34,7 @@ def main() -> int:
     configure_logging()
     install_exception_hook()
     app = QApplication(sys.argv)
+    configure_application_font(app)
     app.setQuitOnLastWindowClosed(False)
     window = MainWindow()
     hotkey = GlobalHotkey(window.show_editor)

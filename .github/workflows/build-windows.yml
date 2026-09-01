@@ -23,6 +23,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Run V2.2 regression tests
+        env:
+          PYTHONPATH: src
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s tests -v
+
       - name: Build application
         run: >
           pyinstaller --noconfirm --clean --windowed --onefile --paths src
@@ -30,6 +36,7 @@ jobs:
           --hidden-import storage.database --hidden-import ui.main_window
           --hidden-import ui.task_dialog --hidden-import ui.float_window
           --hidden-import ui.settings_dialog --hidden-import ui.theme
+          --hidden-import ui.controls
           --name WorkTodo src/main.py
 
       - name: Install Inno Setup

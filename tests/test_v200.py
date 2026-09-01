@@ -1,4 +1,4 @@
-"""Focused V2.1.0 regression checks for settings and reminder rules."""
+"""Focused V2.2.0 regression checks for settings and reminder rules."""
 
 from __future__ import annotations
 
@@ -7,12 +7,15 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
-from PyQt6.QtWidgets import QApplication, QCheckBox, QLabel
+from PyQt6.QtWidgets import QApplication, QCheckBox, QLabel, QMessageBox
 
 from storage.database import Database
 from ui.main_window import MainWindow
+from ui.float_window import FloatWindow
 from ui.settings_dialog import GuidedTimeCombo, SettingsDialog
+from ui.task_dialog import TaskDialog
 
 
 class ReminderHarness:
@@ -71,6 +74,22 @@ class V200Tests(unittest.TestCase):
         self.assertTrue(GuidedTimeCombo._valid_value("07:00"))
         self.assertTrue(GuidedTimeCombo._valid_value("22:50"))
         self.assertFalse(GuidedTimeCombo._valid_value("23:00"))
+        dialog.water_custom[0].set_value("09:30")
+        self.assertTrue(dialog.water_custom[0].property("selected"))
+        self.assertEqual(dialog.water_custom[0].text(), "09:30")
+
+    def test_fixed_water_times_are_individually_selectable(self) -> None:
+        dialog = SettingsDialog(self.db, list(MainWindow.DEFAULT_GREETINGS))
+        self.assertEqual(dialog.values()["water_fixed_times"], ["10:15", "15:15"])
+        dialog.water_fixed_buttons[1].setChecked(False)
+        self.assertEqual(dialog.values()["water_fixed_times"], ["10:15"])
+        self.db.set_setting("water_fixed_times", json.dumps(["10:15"]))
+        self.db.set_setting("water_enabled", "1")
+        self.db.set_setting("meal_enabled", "0")
+        self.db.set_setting("offwork_enabled", "0")
+        self.db.set_setting("overtime_enabled", "0")
+        harness = ReminderHarness(self.db)
+        self.assertEqual(harness._check_lifestyle_reminders(datetime(2026, 9, 1, 15, 15, 20)), [])
 
     def test_greeting_editor_preserves_manual_line_breaks(self) -> None:
         dialog = SettingsDialog(self.db, list(MainWindow.DEFAULT_GREETINGS))
@@ -108,11 +127,11 @@ class V200Tests(unittest.TestCase):
     def test_overtime_copy_uses_half_hour_frequency(self) -> None:
         self.assertEqual(
             MainWindow._overtime_reminder_message(ReminderHarness(self.db), 60),
-            "加班 1 小时了\n你今天辛苦啦！",
+            "加班1小时了！\n你今天辛苦啦！",
         )
         self.assertEqual(
             MainWindow._overtime_reminder_message(ReminderHarness(self.db), 90),
-            "加班 1.5 小时了\n夜深了 回家注意安全哦",
+            "加班1.5小时了！\n夜深了 回家注意安全哦",
         )
 
     def test_overtime_display_minute_boundaries(self) -> None:
@@ -123,20 +142,74 @@ class V200Tests(unittest.TestCase):
         )
         self.assertEqual(
             MainWindow._overtime_header(harness, datetime(2026, 9, 1, 19, 29)),
-            "加班 1 小时了\n你今天辛苦啦！",
+            "加班1小时了！\n你今天辛苦啦！",
         )
         self.assertEqual(
             MainWindow._overtime_header(harness, datetime(2026, 9, 1, 19, 30)),
-            "加班 1.5 小时了\n夜深了 回家注意安全哦",
+            "加班1.5小时了！\n夜深了 回家注意安全哦",
         )
         self.assertEqual(
             MainWindow._overtime_header(harness, datetime(2026, 9, 1, 19, 59)),
-            "加班 1.5 小时了\n夜深了 回家注意安全哦",
+            "加班1.5小时了！\n夜深了 回家注意安全哦",
         )
         self.assertEqual(
             MainWindow._overtime_header(harness, datetime(2026, 9, 1, 20, 0)),
-            "加班 2 小时了\n夜深了 回家注意安全哦",
+            "加班2小时了！\n夜深了 回家注意安全哦",
         )
+
+    def test_precise_overtime_uses_hours_and_minutes(self) -> None:
+        self.assertEqual(MainWindow._format_precise_overtime(30), "已加班 30 分钟")
+        self.assertEqual(MainWindow._format_precise_overtime(60), "已加班 1 小时")
+        self.assertEqual(MainWindow._format_precise_overtime(123), "已加班 2 小时 3 分钟")
+
+    def test_alert_header_is_exactly_two_lines_without_word_wrap(self) -> None:
+        window = FloatWindow()
+        message = "加班3小时了！\n夜深了 回家注意安全哦"
+        window._apply_header(message, "alert")
+        self.assertEqual(window.greeting.text().splitlines(), message.splitlines())
+        self.assertFalse(window.greeting.wordWrap())
+        self.assertGreaterEqual(window.greeting.height(), 38)
+
+    def test_copied_tasks_are_separate_but_float_deduplicates_them(self) -> None:
+        values = {
+            "title": "做合同", "notes": "", "task_date": "2026-09-01",
+            "due_time": "09:00", "is_fixed": False,
+        }
+        first_id = self.db.add_task(**values)
+        second_id = self.db.add_task(**values)
+        self.assertNotEqual(first_id, second_id)
+        self.assertEqual(len(self.db.tasks_for("2026-09-01")), 2)
+        original = {"id": 1, "title": "做合同", "due_time": "09:00"}
+        copied = {"id": 2, "title": "做合同", "due_time": "09:00"}
+        unique = MainWindow._deduplicate_countdown_tasks([original, copied], {2})
+        self.assertEqual(len(unique), 1)
+        self.assertEqual(unique[0]["id"], 2)
+        dialog = TaskDialog({
+            "title": "做合同", "notes": "", "task_date": "2026-09-01",
+            "due_time": "09:00", "is_fixed": 0,
+        })
+        self.assertFalse(dialog.duplicate_check.isHidden())
+        dialog.duplicate_check.setChecked(True)
+        self.assertTrue(dialog.duplicate_requested())
+
+    def test_settings_dirty_state_and_no_wheel_controls(self) -> None:
+        dialog = SettingsDialog(self.db, list(MainWindow.DEFAULT_GREETINGS))
+        initial = dialog._comparison_state()
+        dialog.autostart.toggle()
+        self.assertNotEqual(dialog._comparison_state(), initial)
+        with patch.object(QMessageBox, "exec", return_value=QMessageBox.StandardButton.Cancel) as shown:
+            dialog.reject()
+        shown.assert_called_once()
+
+        class FakeWheel:
+            ignored = False
+
+            def ignore(self):
+                self.ignored = True
+
+        event = FakeWheel()
+        dialog.countdown_count.wheelEvent(event)
+        self.assertTrue(event.ignored)
 
 
 if __name__ == "__main__":

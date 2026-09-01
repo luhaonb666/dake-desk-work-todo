@@ -10,20 +10,21 @@ from datetime import datetime, timedelta
 from PyQt6.QtCore import QDate, QTimer, Qt
 from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import (
-    QApplication, QCheckBox, QDateEdit, QDialog, QFrame, QHBoxLayout, QLabel,
+    QApplication, QCheckBox, QDialog, QFrame, QHBoxLayout, QLabel,
     QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QSystemTrayIcon,
     QTabBar, QVBoxLayout, QWidget,
 )
 
 from app_paths import app_data_dir
 from storage.database import Database
+from ui.controls import NoWheelDateEdit
 from ui.float_window import FloatWindow
 from ui.settings_dialog import SettingsDialog
 from ui.task_dialog import TaskDialog
 from ui.theme import APP_STYLE, TASK_CARD_COLORS
 
 
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.2.0"
 
 
 def app_icon() -> QIcon:
@@ -62,8 +63,8 @@ class TaskCard(QFrame):
         title = QLabel(heading)
         title.setWordWrap(True)
         title.setStyleSheet(
-            "font-size:15px; font-weight:600; color:#8c939d; text-decoration:line-through;"
-            if task["is_completed"] else "font-size:15px; font-weight:600; color:#26313e;"
+            "font-size:15px; font-weight:500; color:#8c939d; text-decoration:line-through;"
+            if task["is_completed"] else "font-size:15px; font-weight:500; color:#26313e;"
         )
         content.addWidget(title)
         if task["notes"]:
@@ -167,13 +168,13 @@ class MainWindow(QMainWindow):
         header_outer.setSpacing(7)
         header = QHBoxLayout()
         title = QLabel(f"工作待办 V{APP_VERSION}")
-        title.setStyleSheet("font-size:25px; font-weight:700; color:#27364a;")
+        title.setStyleSheet("font-size:25px; font-weight:600; color:#27364a;")
         self.header_greeting = QLabel()
         self.header_greeting.setWordWrap(True)
         self.header_greeting.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.header_greeting.setStyleSheet(
             "background:#f1effa; border:1px solid #ddd7ef; border-radius:10px; color:#66527f; "
-            "font-size:13px; font-weight:600; padding:6px 10px;"
+            "font-size:13px; font-weight:500; padding:6px 10px;"
         )
         header.addWidget(title)
         greeting_column = QVBoxLayout()
@@ -181,7 +182,7 @@ class MainWindow(QMainWindow):
         greeting_column.addWidget(self.header_greeting)
         self.precise_overtime = QLabel()
         self.precise_overtime.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.precise_overtime.setStyleSheet("font-size:12px; color:#876b43; font-weight:600;")
+        self.precise_overtime.setStyleSheet("font-size:12px; color:#876b43; font-weight:500;")
         greeting_column.addWidget(self.precise_overtime)
         header.addLayout(greeting_column, 1)
         self.float_button = QPushButton("关闭桌面浮窗")
@@ -218,7 +219,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab("未完成")
         self.tabs.currentChanged.connect(self.on_tab_changed)
         toolbar.addWidget(self.tabs)
-        self.unfinished_date = QDateEdit(QDate.currentDate())
+        self.unfinished_date = NoWheelDateEdit(QDate.currentDate())
         self.unfinished_date.setCalendarPopup(True)
         self.unfinished_date.setDisplayFormat("yyyy-MM-dd")
         self.unfinished_date.dateChanged.connect(lambda _: self.render())
@@ -242,7 +243,7 @@ class MainWindow(QMainWindow):
         self.list_host = QWidget()
         self.list_layout = QVBoxLayout(self.list_host)
         self.list_layout.setContentsMargins(0, 4, 0, 4)
-        self.list_layout.setSpacing(8)
+        self.list_layout.setSpacing(6)
         self.list_layout.addStretch()
         self.scroll.setWidget(self.list_host)
         outer.addWidget(self.scroll, 1)
@@ -284,7 +285,7 @@ class MainWindow(QMainWindow):
     @staticmethod
     def section_label(text: str, top_padding: int = 12) -> QLabel:
         label = QLabel(text)
-        label.setStyleSheet(f"font-size:12px; color:#77808c; font-weight:700; padding:{top_padding}px 2px 3px;")
+        label.setStyleSheet(f"font-size:12px; color:#77808c; font-weight:600; padding:{top_padding}px 2px 3px;")
         return label
 
     def _offwork_datetime(self, now: datetime | None = None) -> datetime | None:
@@ -323,12 +324,21 @@ class MainWindow(QMainWindow):
         else:
             shown = float(hours + 1)
         ending = "夜深了 回家注意安全哦" if shown >= 1.5 else "你今天辛苦啦！"
-        return f"加班 {self._format_hours(shown)} 小时了\n{ending}"
+        return f"加班{self._format_hours(shown)}小时了！\n{ending}"
 
     def _overtime_reminder_message(self, elapsed_minutes: int) -> str:
         hours = elapsed_minutes / 60
         ending = "夜深了 回家注意安全哦" if hours >= 1.5 else "你今天辛苦啦！"
-        return f"加班 {self._format_hours(hours)} 小时了\n{ending}"
+        return f"加班{self._format_hours(hours)}小时了！\n{ending}"
+
+    @staticmethod
+    def _format_precise_overtime(minutes: int) -> str:
+        hours, remaining = divmod(minutes, 60)
+        if hours and remaining:
+            return f"已加班 {hours} 小时 {remaining} 分钟"
+        if hours:
+            return f"已加班 {hours} 小时"
+        return f"已加班 {remaining} 分钟"
 
     def _refresh_header(self, now: datetime) -> None:
         greeting = self.db.get_setting("float_greeting", self.DEFAULT_GREETINGS[0])
@@ -336,7 +346,7 @@ class MainWindow(QMainWindow):
         self.subtitle.setText(now.strftime("今天是 %Y 年 %m 月 %d 日"))
         end = self._offwork_datetime(now)
         minutes = int((now - end).total_seconds() // 60) if end else 0
-        self.precise_overtime.setText(f"已加班 {minutes} 分钟" if minutes >= 30 else "")
+        self.precise_overtime.setText(self._format_precise_overtime(minutes) if minutes >= 30 else "")
 
     def render(self) -> None:
         self.clear_list()
@@ -367,7 +377,7 @@ class MainWindow(QMainWindow):
             empty.setStyleSheet("color:#87909c; padding:28px 6px;")
             self.list_layout.addWidget(empty)
         if fixed:
-            self.list_layout.addWidget(self.section_label("固定待办", 4))
+            self.list_layout.addWidget(self.section_label("固定待办", 0))
             for task in fixed:
                 self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task))
         if self.tabs.currentIndex() == 0:
@@ -376,7 +386,7 @@ class MainWindow(QMainWindow):
             preview = [task for task in tomorrow_tasks if not task["is_fixed"]][:2]
             preview += [task for task in tomorrow_tasks if task["is_fixed"]][:2]
             if preview:
-                self.list_layout.addSpacing(18)
+                self.list_layout.addSpacing(30)
                 preview_host = QFrame()
                 preview_host.setObjectName("previewArea")
                 preview_host.setStyleSheet(
@@ -416,7 +426,11 @@ class MainWindow(QMainWindow):
     def edit_task(self, task) -> None:
         dialog = TaskDialog(task, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.db.update_task(task["id"], **dialog.values())
+            values = dialog.values()
+            if dialog.duplicate_requested():
+                self.db.add_task(**values)
+            else:
+                self.db.update_task(task["id"], **values)
             self.render()
 
     def set_completed(self, task_id: int, completed: bool) -> None:
@@ -451,6 +465,20 @@ class MainWindow(QMainWindow):
         self.db.update_task(task_id, float_slot=slot)
         self.refresh_float()
 
+    @staticmethod
+    def _deduplicate_countdown_tasks(tasks, highlighted_ids: set[int]):
+        """Keep one float card for identical copied items, preferring an alerting copy."""
+        unique = []
+        indexes: dict[tuple[str, str], int] = {}
+        for task in tasks:
+            key = (task["due_time"], task["title"])
+            if key not in indexes:
+                indexes[key] = len(unique)
+                unique.append(task)
+            elif task["id"] in highlighted_ids:
+                unique[indexes[key]] = task
+        return unique
+
     def refresh_float(self, countdown_count: int | None = None, manual_count: int | None = None) -> None:
         now = datetime.now()
         countdown_count = countdown_count if countdown_count is not None else int(self.db.get_setting("countdown_float_count", "3"))
@@ -464,6 +492,10 @@ class MainWindow(QMainWindow):
             (past if due <= now else future).append((due, task))
         visible = [task for _, task in sorted(past, reverse=True, key=lambda pair: pair[0]) if task["id"] in self.alert_task_ids]
         visible.extend(task for _, task in sorted(future, key=lambda pair: pair[0]))
+        # A copied task is intentionally a separate editor record. If its title
+        # and due time are still identical, show only one automatic countdown
+        # card so the compact float is not consumed by duplicates.
+        visible = self._deduplicate_countdown_tasks(visible, self.alert_task_ids)
         countdown = [(task["due_time"], task["title"], task["id"]) for task in visible[:countdown_count]]
         countdown.extend([("", "", -1)] * (countdown_count - len(countdown)))
         fixed = {task["float_slot"]: task for task in self.db.float_tasks()}
@@ -541,7 +573,8 @@ class MainWindow(QMainWindow):
 
         if self.db.get_setting("water_enabled", "1") == "1":
             custom = [value for value in self._setting_list("water_custom_times", ["", "", ""]) if value]
-            water_times = list(dict.fromkeys(["10:15", "15:15", *custom]))
+            fixed = self._setting_list("water_fixed_times", ["10:15", "15:15"])
+            water_times = list(dict.fromkeys([*fixed, *custom]))
             for value in water_times:
                 key = f"water_reminded_{today}_{value}"
                 try:
@@ -650,6 +683,7 @@ class MainWindow(QMainWindow):
             self.db.set_setting("off_work_time", values["off_work_time"])
             self.db.set_setting("autostart", "1" if values["autostart"] else "0")
             self.db.set_setting("water_enabled", "1" if values["water_enabled"] else "0")
+            self.db.set_setting("water_fixed_times", json.dumps(values["water_fixed_times"]))
             self.db.set_setting("water_custom_times", json.dumps(values["water_custom_times"]))
             self.db.set_setting("meal_enabled", "1" if values["meal_enabled"] else "0")
             self.db.set_setting("meal_times", json.dumps(values["meal_times"]))
