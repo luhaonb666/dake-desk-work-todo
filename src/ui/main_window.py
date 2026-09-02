@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import sys
 from datetime import datetime, timedelta
 
@@ -25,7 +26,7 @@ from ui.theme import APP_STYLE, TASK_CARD_COLORS
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "3.1"
+APP_VERSION = "3.2"
 
 
 def app_icon() -> QIcon:
@@ -110,6 +111,7 @@ class MainWindow(QMainWindow):
         self.db = Database(app_data_dir() / "work-todo.db")
         self.db.ensure_settings_table()
         self._ensure_v21_greetings()
+        self._ensure_v32_greetings()
         self.setWindowTitle(f"{APP_NAME} V{APP_VERSION}")
         self.setWindowIcon(app_icon())
         self.resize(760, 760)
@@ -130,8 +132,9 @@ class MainWindow(QMainWindow):
         self.reminder_timer.timeout.connect(self.check_reminders)
         self.reminder_timer.start(30_000)
         self.brand_timer = QTimer(self)
-        self.brand_timer.timeout.connect(lambda: self._refresh_header(datetime.now()))
-        self.brand_timer.start(60_000)
+        self.brand_timer.setSingleShot(True)
+        self.brand_timer.timeout.connect(self._refresh_brand_at_hour)
+        self._schedule_next_brand_hour()
         self.render()
         QTimer.singleShot(250, self.restore_float)
         QTimer.singleShot(1_000, self.check_reminders)
@@ -169,6 +172,43 @@ class MainWindow(QMainWindow):
         self.db.set_setting("saved_float_greetings", json.dumps(migrated, ensure_ascii=False))
         self.db.set_setting("float_greeting", current or (migrated[0] if migrated else ""))
         self.db.set_setting("greetings_v210_seeded", "1")
+
+    @staticmethod
+    def _limit_greeting_lines(text: str) -> str:
+        """Keep float encouragement compact and readable at three lines."""
+        return "\n".join(text.strip().splitlines()[:3])
+
+    def _ensure_v32_greetings(self) -> None:
+        """Remove the reported typo and cap legacy custom greetings at three lines."""
+        if self.db.get_setting("greetings_v320_seeded", "0") == "1":
+            return
+        try:
+            saved = json.loads(self.db.get_setting("saved_float_greetings", ""))
+        except json.JSONDecodeError:
+            saved = []
+        corrected = "我为亚泰添砖加瓦"
+        typo = "我为亚泰添砖贴瓦"
+        cleaned: list[str] = []
+        for item in saved if isinstance(saved, list) else []:
+            if not isinstance(item, str):
+                continue
+            text = self._limit_greeting_lines(item)
+            if not text:
+                continue
+            if text == typo:
+                text = corrected
+            if text not in cleaned:
+                cleaned.append(text)
+        if corrected not in cleaned:
+            cleaned.insert(0, corrected)
+        current = self._limit_greeting_lines(self.db.get_setting("float_greeting", corrected))
+        if current == typo or not current:
+            current = corrected
+        if current not in cleaned:
+            cleaned.append(current)
+        self.db.set_setting("saved_float_greetings", json.dumps(cleaned, ensure_ascii=False))
+        self.db.set_setting("float_greeting", current)
+        self.db.set_setting("greetings_v320_seeded", "1")
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -370,11 +410,31 @@ class MainWindow(QMainWindow):
             return f"已加班 {hours} 小时"
         return f"已加班 {remaining} 分钟"
 
-    @classmethod
-    def _editor_brand_message(cls, now: datetime) -> str:
-        """Rotate the editor copy every 90 minutes without tying it to refreshes."""
-        greetings = cls.WEEKEND_BRAND_GREETINGS if now.weekday() >= 5 else cls.EDITOR_BRAND_GREETINGS
-        return greetings[(now.hour * 60 + now.minute) // 90 % len(greetings)]
+    def _editor_brand_message(self, now: datetime) -> str:
+        """Choose one non-repeating brand line for each complete clock hour."""
+        hour_key = now.strftime("%Y-%m-%d-%H")
+        greetings = self.WEEKEND_BRAND_GREETINGS if now.weekday() >= 5 else self.EDITOR_BRAND_GREETINGS
+        cached_hour = self.db.get_setting("editor_brand_hour", "")
+        cached = self.db.get_setting("editor_brand_message", "")
+        if cached_hour == hour_key and cached in greetings:
+            return cached
+        previous = self.db.get_setting("editor_brand_previous", "")
+        choices = [message for message in greetings if message != previous] or list(greetings)
+        selected = random.choice(choices)
+        self.db.set_setting("editor_brand_hour", hour_key)
+        self.db.set_setting("editor_brand_message", selected)
+        self.db.set_setting("editor_brand_previous", selected)
+        return selected
+
+    def _schedule_next_brand_hour(self) -> None:
+        now = datetime.now()
+        next_hour = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        delay_ms = max(1_000, int((next_hour - now).total_seconds() * 1_000) + 30)
+        self.brand_timer.start(delay_ms)
+
+    def _refresh_brand_at_hour(self) -> None:
+        self._refresh_header(datetime.now())
+        self._schedule_next_brand_hour()
 
     def _refresh_header(self, now: datetime) -> None:
         self.header_greeting.setText(self._editor_brand_message(now))

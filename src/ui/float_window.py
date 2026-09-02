@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QPushButt
 
 
 class FloatBadge(QWidget):
-    """Paint time diagonally, while keeping manual slot numbers near the top."""
+    """Paint compact time with tabular digits, plus manual slot numbers."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -17,6 +17,15 @@ class FloatBadge(QWidget):
         self.setFixedSize(23, 28)
         self.value = ""
         self.color = QColor("#64707e")
+
+    def _badge_font(self, pixel_size: int) -> QFont:
+        """Use Windows' tabular digits so 14:00 and 15:10 balance equally."""
+        font = QFont("Consolas")
+        font.setStyleHint(QFont.StyleHint.Monospace)
+        font.setFixedPitch(True)
+        font.setPixelSize(pixel_size)
+        font.setWeight(QFont.Weight.DemiBold)
+        return font
 
     def set_value(self, value: str, color: str) -> None:
         self.value = value
@@ -32,12 +41,10 @@ class FloatBadge(QWidget):
         painter.setPen(self.color)
         if ":" in self.value:
             hour, minute = self.value.split(":", 1)
-            font = QFont(self.font())
-            font.setPixelSize(11)
-            font.setWeight(QFont.Weight.DemiBold)
+            font = self._badge_font(12)
             painter.setFont(font)
             half = self.height() // 2
-            # V3.1 keeps hour and minute on exactly the same vertical axis. Their
+            # V3.2 keeps hour and minute on exactly the same vertical axis. Their
             # two bounding rectangles meet at the centre so the lines sit closer
             # together without losing the narrow badge footprint.
             painter.drawText(
@@ -53,9 +60,7 @@ class FloatBadge(QWidget):
             painter.setPen(QPen(self.color, 1))
             painter.drawLine(9, half, 14, half)
         else:
-            font = QFont(self.font())
-            font.setPixelSize(13)
-            font.setWeight(QFont.Weight.DemiBold)
+            font = self._badge_font(14)
             painter.setFont(font)
             painter.drawText(
                 QRect(0, 1, self.width(), max(16, self.height() // 2 + 5)),
@@ -139,7 +144,7 @@ class FloatWindow(QWidget):
 
     def __init__(self) -> None:
         super().__init__(None)
-        self.setWindowTitle("大可桌边 V3.1 · 浮窗")
+        self.setWindowTitle("大可桌边 V3.2 · 浮窗")
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(self.EXPANDED_WIDTH)

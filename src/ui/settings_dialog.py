@@ -159,17 +159,31 @@ class MultilineComboBox(NoWheelComboBox):
 
 
 class AutoHeightTextEdit(QPlainTextEdit):
-    """Small multiline editor that grows as intentional line breaks are added."""
+    """Small editor that preserves intentional line breaks, up to three lines."""
+
+    MAX_LINES = 3
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setMinimumHeight(58)
-        self.setMaximumHeight(116)
+        self.setMaximumHeight(84)
+        self._trimming_lines = False
         self.document().blockCountChanged.connect(self._resize_to_lines)
+        self.textChanged.connect(self._limit_to_three_lines)
+
+    def _limit_to_three_lines(self) -> None:
+        if self._trimming_lines or self.document().blockCount() <= self.MAX_LINES:
+            return
+        self._trimming_lines = True
+        self.setPlainText("\n".join(self.toPlainText().splitlines()[:self.MAX_LINES]))
+        cursor = self.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        self.setTextCursor(cursor)
+        self._trimming_lines = False
 
     def _resize_to_lines(self) -> None:
-        lines = max(2, self.document().blockCount())
-        self.setFixedHeight(min(116, 24 + lines * 20))
+        lines = min(self.MAX_LINES, max(2, self.document().blockCount()))
+        self.setFixedHeight(min(84, 24 + lines * 20))
 
 
 class SettingsSection(QFrame):
@@ -199,7 +213,9 @@ class SettingsDialog(QDialog):
     OFFWORK_CHOICES = (5, 10, 15, 20, 30)
     FIXED_WATER_TIMES = ("10:15", "15:15")
     MEAL_TIMES = ("11:59", "17:59")
-    WATER_SLOT_SIZE = (68, 34)
+    # Match meal chips exactly: a time never gets more horizontal room merely
+    # because it contains a colon and four digits.
+    WATER_SLOT_SIZE = (54, 31)
 
     def __init__(self, db, greetings: list[str], parent=None) -> None:
         super().__init__(parent)
@@ -328,6 +344,8 @@ class SettingsDialog(QDialog):
         self.meal_enabled.setChecked(self.db.get_setting("meal_enabled", "0") == "1")
         selected_meals = set(self._load_json_list(self.db.get_setting("meal_times", ""), list(self.MEAL_TIMES)))
         self.meal_buttons = [self._choice(value, value in selected_meals) for value in self.MEAL_TIMES]
+        for button in self.meal_buttons:
+            button.setFixedSize(*self.WATER_SLOT_SIZE)
         section.add_row(self._row(self.meal_enabled, *self.meal_buttons), divider=True)
 
         self.offwork_enabled = QCheckBox("下班提醒")
@@ -368,15 +386,15 @@ class SettingsDialog(QDialog):
         self.greeting.setCurrentIndex(index if index >= 0 else (0 if greetings else -1))
         self.delete_greeting = QPushButton("删除当前鼓励语")
         self.delete_greeting.setObjectName("dangerButton")
-        self.delete_greeting.setFixedWidth(110)
+        self.delete_greeting.setFixedWidth(118)
         self.delete_greeting.clicked.connect(self._remove_greeting)
         section.add_row(self._row(self._row_label("当前鼓励语"), self.greeting, self.delete_greeting, stretch=False))
 
         self.custom_greeting = AutoHeightTextEdit()
-        self.custom_greeting.setMinimumWidth(210)
-        self.custom_greeting.setPlaceholderText("可以输入多行鼓励语，换行会原样显示在浮窗中")
+        self.custom_greeting.setFixedWidth(230)
+        self.custom_greeting.setPlaceholderText("可以输入多行鼓励语\n换行会原样显示在浮窗中")
         self.save_greeting = QPushButton("保存为新鼓励语")
-        self.save_greeting.setFixedWidth(110)
+        self.save_greeting.setFixedWidth(118)
         self.save_greeting.clicked.connect(self._save_custom_greeting)
         section.add_row(self._row(self._row_label("自定义鼓励语"), self.custom_greeting, self.save_greeting, stretch=False), divider=True)
         self.sections.addWidget(section)

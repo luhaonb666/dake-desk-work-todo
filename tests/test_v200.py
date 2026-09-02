@@ -1,4 +1,4 @@
-"""Focused V3.1 regression checks for settings, reminders, and task views."""
+"""Focused V3.2 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -43,6 +43,7 @@ class TriggerHarness:
 class ReminderHarness:
     DEFAULT_GREETINGS = MainWindow.DEFAULT_GREETINGS
     _ensure_v21_greetings = MainWindow._ensure_v21_greetings
+    _limit_greeting_lines = staticmethod(MainWindow._limit_greeting_lines)
     _setting_list = MainWindow._setting_list
     _format_hours = staticmethod(MainWindow._format_hours)
     _overtime_reminder_message = MainWindow._overtime_reminder_message
@@ -53,6 +54,15 @@ class ReminderHarness:
 
     def _offwork_datetime(self, now: datetime) -> datetime:
         return datetime.strptime(f"{now.date().isoformat()} 18:10", "%Y-%m-%d %H:%M")
+
+
+class BrandHarness:
+    EDITOR_BRAND_GREETINGS = MainWindow.EDITOR_BRAND_GREETINGS
+    WEEKEND_BRAND_GREETINGS = MainWindow.WEEKEND_BRAND_GREETINGS
+    _editor_brand_message = MainWindow._editor_brand_message
+
+    def __init__(self, db: Database) -> None:
+        self.db = db
 
 
 class V200Tests(unittest.TestCase):
@@ -85,6 +95,7 @@ class V200Tests(unittest.TestCase):
             if checkbox.text() in {"喝水提醒", "吃饭提醒", "下班提醒", "加班提醒"}
         ]
         self.assertEqual(reminder_names, ["喝水提醒", "吃饭提醒", "下班提醒", "加班提醒"])
+        self.assertEqual(dialog.overtime_cadence.currentData(), "30")
 
     def test_custom_water_slots_match_time_grid(self) -> None:
         dialog = SettingsDialog(self.db, list(MainWindow.DEFAULT_GREETINGS))
@@ -134,6 +145,30 @@ class V200Tests(unittest.TestCase):
         self.assertNotIn(retired, saved)
         self.assertIn("我的自定义文字", saved)
         self.assertEqual(self.db.get_setting("float_greeting"), "我为亚泰添砖加瓦")
+
+    def test_v32_corrects_greeting_typo_and_limits_legacy_lines(self) -> None:
+        self.db.set_setting(
+            "saved_float_greetings",
+            json.dumps(["我为亚泰添砖贴瓦", "一\n二\n三\n四"], ensure_ascii=False),
+        )
+        self.db.set_setting("float_greeting", "我为亚泰添砖贴瓦")
+        harness = ReminderHarness(self.db)
+        MainWindow._ensure_v32_greetings(harness)
+        saved = json.loads(self.db.get_setting("saved_float_greetings"))
+        self.assertIn("我为亚泰添砖加瓦", saved)
+        self.assertNotIn("我为亚泰添砖贴瓦", saved)
+        self.assertIn("一\n二\n三", saved)
+        self.assertEqual(self.db.get_setting("float_greeting"), "我为亚泰添砖加瓦")
+
+    def test_brand_copy_is_stable_for_one_clock_hour_then_changes(self) -> None:
+        harness = BrandHarness(self.db)
+        with patch("ui.main_window.random.choice", side_effect=["让要紧的事，在桌边等你。", "今天也要对自己好一点。"]) as choice:
+            first = harness._editor_brand_message(datetime(2026, 9, 1, 10, 5))
+            same_hour = harness._editor_brand_message(datetime(2026, 9, 1, 10, 59))
+            next_hour = harness._editor_brand_message(datetime(2026, 9, 1, 11, 0))
+        self.assertEqual(first, same_hour)
+        self.assertNotEqual(first, next_hour)
+        self.assertEqual(choice.call_count, 2)
 
     def test_water_reminder_copy(self) -> None:
         self.db.set_setting("water_enabled", "1")
@@ -261,18 +296,27 @@ class V200Tests(unittest.TestCase):
         self.assertEqual(dialog.title_edit.document().blockCount(), 2)
         self.assertEqual(dialog.title_edit.toPlainText(), "第一行\n第二行 第三行")
 
-    def test_v230_water_slots_align_and_greeting_shows_two_lines(self) -> None:
+    def test_v320_water_slots_match_meal_chips_and_greeting_shows_two_lines(self) -> None:
         dialog = SettingsDialog(self.db, list(MainWindow.DEFAULT_GREETINGS))
         dialog.greeting.setCurrentIndex(1)
         dialog.show()
         self.app.processEvents()
         controls = [*dialog.water_fixed_buttons, *dialog.water_custom]
-        self.assertEqual({(control.width(), control.height()) for control in controls}, {(68, 34)})
+        self.assertEqual({(control.width(), control.height()) for control in controls}, {(54, 31)})
+        self.assertEqual(
+            {(control.width(), control.height()) for control in dialog.meal_buttons}, {(54, 31)}
+        )
         positions = {control.mapTo(dialog, control.rect().topLeft()).y() for control in controls}
         self.assertEqual(len(positions), 1)
         self.assertEqual(dialog.width(), 620)
         self.assertGreaterEqual(dialog.greeting.height(), 48)
         self.assertIn("\n", dialog.greeting.currentText())
+
+    def test_v320_custom_greeting_stops_at_three_lines(self) -> None:
+        dialog = SettingsDialog(self.db, list(MainWindow.DEFAULT_GREETINGS))
+        dialog.custom_greeting.setPlainText("一\n二\n三\n四")
+        self.assertEqual(dialog.custom_greeting.toPlainText(), "一\n二\n三")
+        self.assertLessEqual(dialog.custom_greeting.document().blockCount(), 3)
 
     def test_v230_single_line_float_card_is_larger_and_bolder(self) -> None:
         card = FloatCard()

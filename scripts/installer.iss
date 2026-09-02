@@ -1,5 +1,5 @@
 #define AppName "大可桌边"
-#define AppVersion "3.1"
+#define AppVersion "3.2"
 #define AppPublisher "大可"
 #define AppExeName "DaKeDesk.exe"
 
@@ -26,6 +26,12 @@ Source: "..\dist\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
 [InstallDelete]
 Type: files; Name: "{app}\WorkTodo.exe"
+; The AppId stays the same so an upgrade retains its program location and
+; local data. Remove only the obsolete shortcut files from the old name.
+Type: files; Name: "{autodesktop}\Work Todo.lnk"
+Type: files; Name: "{autodesktop}\WorkTodo.lnk"
+Type: files; Name: "{autoprograms}\Work Todo.lnk"
+Type: files; Name: "{autoprograms}\WorkTodo.lnk"
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"
@@ -55,9 +61,10 @@ var
 begin
   GuidePage := CreateOutputMsgMemoPage(
     wpWelcome,
+    '大可桌边｜Windows 桌面工作待办工具',
+    '让要紧的事，在桌边等你。',
     '安装位置说明',
-    '推荐安装到 D:、E: 等非系统磁盘',
-    '无需提前创建文件夹',
+    '推荐安装到 D:、E: 等非系统磁盘。无需提前创建文件夹。'#13#10#13#10 +
     '首次安装时，选择磁盘后，安装程序会自动建立“大可桌边”专用文件夹。'#13#10#13#10 +
     '待办内容和个人设置会独立保存在当前 Windows 用户数据中；后续升级会保留已有内容。'#13#10#13#10 +
     '如需自行整理文件夹，可在下一步点击“浏览”更改安装位置。'
