@@ -1,1 +1,1 @@
-"""Work Todo application package."""
+"""DaKe Desk application package."""

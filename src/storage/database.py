@@ -172,6 +172,16 @@ class Database:
             ).fetchall()
         )
 
+    def all_tasks(self) -> list[sqlite3.Row]:
+        """Return the complete local history, including completed items."""
+        return list(
+            self.connection.execute(
+                """SELECT * FROM tasks
+                   WHERE deleted_at IS NULL
+                   ORDER BY task_date ASC, is_fixed ASC, due_time IS NULL ASC, due_time ASC, created_at ASC"""
+            ).fetchall()
+        )
+
     def float_tasks(self) -> list[sqlite3.Row]:
         return list(
             self.connection.execute(

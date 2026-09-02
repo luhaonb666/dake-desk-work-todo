@@ -1,4 +1,4 @@
-"""Focused V2.3.0 regression checks for settings and reminder rules."""
+"""Focused V3.1 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -16,6 +16,28 @@ from ui.main_window import MainWindow
 from ui.float_window import FloatCard, FloatWindow
 from ui.settings_dialog import GuidedTimeCombo, SettingsDialog
 from ui.task_dialog import TaskDialog
+
+
+class FloatAlertSpy:
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    def show_alert(self, message: str = "") -> None:
+        self.messages.append(message)
+
+
+class TriggerHarness:
+    _trigger_float = MainWindow._trigger_float
+
+    def __init__(self, overtime_active: bool = True) -> None:
+        self.overtime_active = overtime_active
+        self.float_window = FloatAlertSpy()
+
+    def float_is_enabled(self) -> bool:
+        return True
+
+    def _overtime_header(self, now: datetime) -> str:
+        return "加班1小时了！\n你今天辛苦啦！" if self.overtime_active else ""
 
 
 class ReminderHarness:
@@ -121,8 +143,15 @@ class V200Tests(unittest.TestCase):
         harness = ReminderHarness(self.db)
         morning = harness._check_lifestyle_reminders(datetime(2026, 9, 1, 10, 15, 20))
         afternoon = harness._check_lifestyle_reminders(datetime(2026, 9, 1, 15, 15, 20))
-        self.assertEqual(morning, ["喝水时间到了\n你辛苦啦！"])
-        self.assertEqual(afternoon, ["下午三点，饮茶了先！\n你辛苦啦！"])
+        self.assertEqual(morning, [("water", "喝水时间到了\n你辛苦啦！")])
+        self.assertEqual(afternoon, [("water", "下午三点，饮茶了先！\n你辛苦啦！")])
+
+    def test_overtime_alert_type_does_not_depend_on_copy_spacing(self) -> None:
+        harness = TriggerHarness()
+        harness._trigger_float("加班5小时了！\n夜深了 回家注意安全哦", reminder_kind="overtime")
+        self.assertEqual(harness.float_window.messages, ["加班5小时了！\n夜深了 回家注意安全哦"])
+        harness._trigger_float("喝水时间到了\n你辛苦啦！", reminder_kind="water")
+        self.assertEqual(harness.float_window.messages[-1], "")
 
     def test_overtime_copy_uses_half_hour_frequency(self) -> None:
         self.assertEqual(
@@ -191,6 +220,21 @@ class V200Tests(unittest.TestCase):
         self.assertFalse(dialog.duplicate_check.isHidden())
         dialog.duplicate_check.setChecked(True)
         self.assertTrue(dialog.duplicate_requested())
+
+    def test_past_due_task_is_not_a_new_reminder_schedule(self) -> None:
+        past = {"task_date": "2026-09-01", "due_time": "09:00"}
+        future = {"task_date": "2026-09-01", "due_time": "18:00"}
+        with patch("ui.main_window.datetime") as clock:
+            clock.now.return_value = datetime(2026, 9, 1, 15, 0)
+            clock.strptime.side_effect = datetime.strptime
+            self.assertTrue(MainWindow._is_past_due(past))
+            self.assertFalse(MainWindow._is_past_due(future))
+
+    def test_all_tasks_keeps_completed_history(self) -> None:
+        first = self.db.add_task("昨天完成", "", "2026-08-31", None, False)
+        self.db.set_completed(first, True)
+        self.db.add_task("今天未完成", "", "2026-09-01", None, False)
+        self.assertEqual([task["title"] for task in self.db.all_tasks()], ["昨天完成", "今天未完成"])
 
     def test_settings_dirty_state_and_no_wheel_controls(self) -> None:
         dialog = SettingsDialog(self.db, list(MainWindow.DEFAULT_GREETINGS))

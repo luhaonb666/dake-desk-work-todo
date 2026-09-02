@@ -23,7 +23,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run V2.3 regression tests
+      - name: Run V3.1 regression tests
         env:
           PYTHONPATH: src
           QT_QPA_PLATFORM: offscreen
@@ -37,7 +37,7 @@ jobs:
           --hidden-import ui.task_dialog --hidden-import ui.float_window
           --hidden-import ui.settings_dialog --hidden-import ui.theme
           --hidden-import ui.controls
-          --name WorkTodo src/main.py
+          --name DaKeDesk src/main.py
 
       - name: Install Inno Setup
         run: choco install innosetup --yes --no-progress
@@ -49,6 +49,6 @@ jobs:
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: WorkTodo-Setup
-          path: release/WorkTodo-Setup.exe
+          name: DaKeDesk-Setup
+          path: release/DaKeDesk-Setup.exe
           retention-days: 14

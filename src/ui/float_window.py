@@ -1,4 +1,4 @@
-"""Compact, animated desktop float panel for Work Todo."""
+"""Compact, animated desktop float panel for DaKe Desk."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ class FloatBadge(QWidget):
             font.setWeight(QFont.Weight.DemiBold)
             painter.setFont(font)
             half = self.height() // 2
-            # V2.3 keeps hour and minute on exactly the same vertical axis. Their
+            # V3.1 keeps hour and minute on exactly the same vertical axis. Their
             # two bounding rectangles meet at the centre so the lines sit closer
             # together without losing the narrow badge footprint.
             painter.drawText(
@@ -139,7 +139,7 @@ class FloatWindow(QWidget):
 
     def __init__(self) -> None:
         super().__init__(None)
-        self.setWindowTitle("工作待办 V2.3.0 · 浮窗")
+        self.setWindowTitle("大可桌边 V3.1 · 浮窗")
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(self.EXPANDED_WIDTH)

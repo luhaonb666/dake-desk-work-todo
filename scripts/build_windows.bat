@@ -30,7 +30,7 @@ pyinstaller --noconfirm --clean --windowed --onefile --paths src ^
   --hidden-import ui.settings_dialog ^
   --hidden-import ui.theme ^
   --hidden-import ui.controls ^
-  --name WorkTodo src\main.py
+  --name DaKeDesk src\main.py
 if errorlevel 1 (
   echo Program build failed. Please keep this window open and send the error text or screenshot.
   pause
@@ -41,7 +41,7 @@ set "ISCC_PATH=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC_PATH%" set "ISCC_PATH=C:\Program Files\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC_PATH%" (
   echo.
-  echo Program build complete: dist\WorkTodo.exe
+  echo Program build complete: dist\DaKeDesk.exe
   echo To create Setup.exe, install Inno Setup once and run this script again.
   pause
   exit /b 0
@@ -49,5 +49,5 @@ if not exist "%ISCC_PATH%" (
 
 "%ISCC_PATH%" scripts\installer.iss
 echo.
-echo Installer complete: release\WorkTodo-Setup.exe
+echo Installer complete: release\DaKeDesk-Setup.exe
 pause

@@ -1,11 +1,11 @@
-# Work Todo V2
+# 大可桌边 V3.1
 
-Windows 本地桌面待办工具，当前发布版本为 V2.3.0。数据保存在 Windows 的 `%LOCALAPPDATA%\WorkTodo`，不会随安装包升级被覆盖。
+Windows 本地桌面工作待办工具。程序显示名称为“大可桌边”；数据继续保存在 Windows 的 `%LOCALAPPDATA%\WorkTodo`，以确保旧版本升级后仍能读取已有待办，不会被安装包覆盖。
 
 ## 当前交互
 
 - `Alt + E`、桌面快捷方式或双击桌面浮窗，均打开同一个编辑主窗。
-- 编辑主窗默认显示“全部”，当天事项按时间排序；“未完成”仅作为筛选项。
+- 编辑主窗默认显示“当日”，当天事项按时间排序；“未完成”可选择任意日期或查看全部未完成；“全部”可滚动查看所有历史事项。
 - 有时间且固定钉住的待办同时按时间出现在当天事项中，并在最底部固定待办区域保留一份。
 - 明日预览使用灰白色未启用状态；往下滚动可看最多两条普通明日事项和两条固定明日事项。
 - 桌面浮窗支持 3–5 条倒计时待办和 0–4 条手动固定内容；超过七条时自动压缩卡片高度。
@@ -19,8 +19,8 @@ Windows 本地桌面待办工具，当前发布版本为 V2.3.0。数据保存�
 
 复制项目到 Windows 时不必复制 Mac 上的 `.venv` 文件夹；Windows 脚本会单独创建 `.venv-windows`。
 
-- 首次如未安装 Inno Setup，会先生成 `dist\WorkTodo.exe`。
-- 安装 Inno Setup 后再运行同一脚本，生成 `release\WorkTodo-Setup.exe`。
+- 首次如未安装 Inno Setup，会先生成 `dist\DaKeDesk.exe`。
+- 安装 Inno Setup 后再运行同一脚本，生成 `release\DaKeDesk-Setup.exe`。
 
 不要把 `data` 或数据库放在 exe 文件旁；应用自动使用 Windows 用户数据目录。
 
@@ -30,4 +30,4 @@ Windows 本地桌面待办工具，当前发布版本为 V2.3.0。数据保存�
 
 ## GitHub 自动构建
 
-项目已包含 `.github/workflows/build-windows.yml`。上传到**私有** GitHub 仓库后，打开仓库的 **Actions** 页面，选择 **Build Windows installer**，点击 **Run workflow**。等待绿色成功标记后，在该次运行页面的 **Artifacts** 下载 `WorkTodo-Setup`，解压即可得到 `WorkTodo-Setup.exe`。
+项目已包含 `.github/workflows/build-windows.yml`。上传到**私有** GitHub 仓库后，打开仓库的 **Actions** 页面，选择 **Build Windows installer**，点击 **Run workflow**。等待绿色成功标记后，在该次运行页面的 **Artifacts** 下载 `DaKeDesk-Setup`，解压即可得到 `DaKeDesk-Setup.exe`。

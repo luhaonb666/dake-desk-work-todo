@@ -1,4 +1,4 @@
-"""Shared V2 visual language for Work Todo's desktop windows."""
+"""Shared visual language for DaKe Desk desktop windows."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""The editable Work Todo window and its compact desktop float panel."""
+"""The editable DaKe Desk window and its compact desktop float panel."""
 
 from __future__ import annotations
 
@@ -24,7 +24,8 @@ from ui.task_dialog import TaskDialog
 from ui.theme import APP_STYLE, TASK_CARD_COLORS
 
 
-APP_VERSION = "2.3.0"
+APP_NAME = "大可桌边"
+APP_VERSION = "3.1"
 
 
 def app_icon() -> QIcon:
@@ -92,13 +93,24 @@ class MainWindow(QMainWindow):
         "工作辛苦\n你也要保持开心鸭！",
         "慢慢推进\n今天非常棒！",
     ]
+    EDITOR_BRAND_GREETINGS = [
+        "让要紧的事，在桌边等你。",
+        "大可桌边，只在需要时提醒你。",
+        "工作在推进，生活也别忘了照顾。",
+        "今天也要对自己好一点。",
+        "忙一点没关系，慢一点也没关系。",
+    ]
+    WEEKEND_BRAND_GREETINGS = [
+        "周末还在推进，辛苦啦。",
+        "周末也在认真生活和工作，别忘了照顾自己。",
+    ]
 
     def __init__(self) -> None:
         super().__init__()
         self.db = Database(app_data_dir() / "work-todo.db")
         self.db.ensure_settings_table()
         self._ensure_v21_greetings()
-        self.setWindowTitle(f"工作待办 V{APP_VERSION}")
+        self.setWindowTitle(f"{APP_NAME} V{APP_VERSION}")
         self.setWindowIcon(app_icon())
         self.resize(760, 760)
         self.setMinimumSize(570, 520)
@@ -117,6 +129,9 @@ class MainWindow(QMainWindow):
         self.reminder_timer = QTimer(self)
         self.reminder_timer.timeout.connect(self.check_reminders)
         self.reminder_timer.start(30_000)
+        self.brand_timer = QTimer(self)
+        self.brand_timer.timeout.connect(lambda: self._refresh_header(datetime.now()))
+        self.brand_timer.start(60_000)
         self.render()
         QTimer.singleShot(250, self.restore_float)
         QTimer.singleShot(1_000, self.check_reminders)
@@ -169,7 +184,7 @@ class MainWindow(QMainWindow):
         header_outer.setContentsMargins(16, 13, 16, 11)
         header_outer.setSpacing(7)
         header = QHBoxLayout()
-        title = QLabel(f"工作待办 V{APP_VERSION}")
+        title = QLabel(f"{APP_NAME} V{APP_VERSION}")
         title.setStyleSheet("font-size:25px; font-weight:600; color:#27364a;")
         self.header_greeting = QLabel()
         self.header_greeting.setWordWrap(True)
@@ -214,29 +229,43 @@ class MainWindow(QMainWindow):
 
         toolbar_panel = QFrame()
         toolbar_panel.setObjectName("chromePanel")
+        toolbar_outer = QVBoxLayout(toolbar_panel)
+        toolbar_outer.setContentsMargins(10, 5, 10, 5)
+        toolbar_outer.setSpacing(4)
         toolbar = QHBoxLayout()
-        toolbar.setContentsMargins(10, 5, 10, 5)
+        toolbar.setContentsMargins(0, 0, 0, 0)
         self.tabs = QTabBar()
-        self.tabs.addTab("全部")
+        self.tabs.addTab("当日")
         self.tabs.addTab("未完成")
+        self.tabs.addTab("全部")
+        self.tabs.setStyleSheet("QTabBar::tab:last { margin-left:18px; }")
         self.tabs.currentChanged.connect(self.on_tab_changed)
         toolbar.addWidget(self.tabs)
-        self.unfinished_date = NoWheelDateEdit(QDate.currentDate())
-        self.unfinished_date.setCalendarPopup(True)
-        self.unfinished_date.setDisplayFormat("yyyy-MM-dd")
-        self.unfinished_date.dateChanged.connect(lambda _: self.render())
-        self.unfinished_date.setVisible(False)
-        toolbar.addWidget(self.unfinished_date)
-        self.all_unfinished = QCheckBox("全部未完成")
-        self.all_unfinished.toggled.connect(self.render)
-        self.all_unfinished.setVisible(False)
-        toolbar.addWidget(self.all_unfinished)
         toolbar.addStretch()
         add = QPushButton("+ 添加事项")
         add.setObjectName("primaryButton")
         add.clicked.connect(self.add_task)
         toolbar.addWidget(add)
-        toolbar_panel.setLayout(toolbar)
+        toolbar_outer.addLayout(toolbar)
+
+        self.unfinished_filter_row = QWidget()
+        unfinished_filters = QHBoxLayout(self.unfinished_filter_row)
+        unfinished_filters.setContentsMargins(5, 0, 5, 3)
+        unfinished_filters.setSpacing(7)
+        filter_label = QLabel("查看日期")
+        filter_label.setStyleSheet("font-size:12px; color:#77808c; font-weight:500;")
+        unfinished_filters.addWidget(filter_label)
+        self.unfinished_date = NoWheelDateEdit(QDate.currentDate())
+        self.unfinished_date.setCalendarPopup(True)
+        self.unfinished_date.setDisplayFormat("yyyy-MM-dd")
+        self.unfinished_date.dateChanged.connect(lambda _: self.render())
+        unfinished_filters.addWidget(self.unfinished_date)
+        self.all_unfinished = QCheckBox("查看全部未完成")
+        self.all_unfinished.toggled.connect(self.render)
+        unfinished_filters.addWidget(self.all_unfinished)
+        unfinished_filters.addStretch()
+        self.unfinished_filter_row.setVisible(False)
+        toolbar_outer.addWidget(self.unfinished_filter_row)
         outer.addWidget(toolbar_panel)
 
         self.scroll = QScrollArea()
@@ -256,13 +285,12 @@ class MainWindow(QMainWindow):
 
     def on_tab_changed(self, index: int) -> None:
         is_unfinished = index == 1
-        self.unfinished_date.setVisible(is_unfinished)
-        self.all_unfinished.setVisible(is_unfinished)
+        self.unfinished_filter_row.setVisible(is_unfinished)
         self.render()
 
     def _build_tray(self) -> None:
         self.tray = QSystemTrayIcon(self.windowIcon(), self)
-        self.tray.setToolTip(f"工作待办 V{APP_VERSION}")
+        self.tray.setToolTip(f"{APP_NAME} V{APP_VERSION}")
         menu = QMenu(self)
         open_action = QAction("打开编辑主窗", self)
         open_action.triggered.connect(self.show_editor)
@@ -342,9 +370,14 @@ class MainWindow(QMainWindow):
             return f"已加班 {hours} 小时"
         return f"已加班 {remaining} 分钟"
 
+    @classmethod
+    def _editor_brand_message(cls, now: datetime) -> str:
+        """Rotate the editor copy every 90 minutes without tying it to refreshes."""
+        greetings = cls.WEEKEND_BRAND_GREETINGS if now.weekday() >= 5 else cls.EDITOR_BRAND_GREETINGS
+        return greetings[(now.hour * 60 + now.minute) // 90 % len(greetings)]
+
     def _refresh_header(self, now: datetime) -> None:
-        greeting = self.db.get_setting("float_greeting", self.DEFAULT_GREETINGS[0])
-        self.header_greeting.setText(greeting)
+        self.header_greeting.setText(self._editor_brand_message(now))
         self.subtitle.setText(now.strftime("今天是 %Y 年 %m 月 %d 日"))
         end = self._offwork_datetime(now)
         minutes = int((now - end).total_seconds() // 60) if end else 0
@@ -355,10 +388,16 @@ class MainWindow(QMainWindow):
         now = datetime.now()
         self._refresh_header(now)
         today = self.db.today()
-        showing_all_pending = self.tabs.currentIndex() == 1 and self.all_unfinished.isChecked()
-        selected_day = self.unfinished_date.date().toString("yyyy-MM-dd") if self.tabs.currentIndex() == 1 else today
+        active_tab = self.tabs.currentIndex()
+        showing_all_pending = active_tab == 1 and self.all_unfinished.isChecked()
+        if active_tab == 2:
+            self._render_all_tasks(self.db.all_tasks())
+            self.list_layout.addStretch(1)
+            self.refresh_float()
+            return
+        selected_day = self.unfinished_date.date().toString("yyyy-MM-dd") if active_tab == 1 else today
         tasks = self.db.all_pending_tasks() if showing_all_pending else self.db.tasks_for(
-            selected_day, self.tabs.currentIndex() == 1
+            selected_day, active_tab == 1
         )
         if showing_all_pending:
             self._render_all_pending(tasks)
@@ -371,11 +410,13 @@ class MainWindow(QMainWindow):
         normal.sort(key=lambda task: (task["due_time"] is None, task["due_time"] or "", task["created_at"]))
         fixed = [task for task in tasks if task["is_fixed"]]
         if normal:
-            self.list_layout.addWidget(self.section_label("今日事项"))
+            section_title = "今日事项" if active_tab == 0 else f"{selected_day} · 未完成"
+            self.list_layout.addWidget(self.section_label(section_title))
             for task in normal:
                 self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task))
         else:
-            empty = QLabel("今天还没有事项。点击右上角“添加事项”开始安排。")
+            empty_text = "今天还没有事项。点击右上角“添加事项”开始安排。" if active_tab == 0 else "这一天没有未完成事项。"
+            empty = QLabel(empty_text)
             empty.setStyleSheet("color:#87909c; padding:28px 6px;")
             self.list_layout.addWidget(empty)
         if fixed:
@@ -384,7 +425,7 @@ class MainWindow(QMainWindow):
             self.list_layout.addWidget(fixed_label)
             for task in fixed:
                 self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task))
-        if self.tabs.currentIndex() == 0:
+        if active_tab == 0:
             tomorrow = (now + timedelta(days=1)).date().isoformat()
             tomorrow_tasks = self.db.tasks_for(tomorrow)
             preview = [task for task in tomorrow_tasks if not task["is_fixed"]][:2]
@@ -421,10 +462,42 @@ class MainWindow(QMainWindow):
                 self.list_layout.addWidget(self.section_label(f"{current_date} · 未完成"))
             self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task))
 
+    def _render_all_tasks(self, tasks) -> None:
+        if not tasks:
+            empty = QLabel("还没有保存的事项。")
+            empty.setStyleSheet("color:#87909c; padding:28px 6px;")
+            self.list_layout.addWidget(empty)
+            return
+        current_date = None
+        for task in tasks:
+            if task["task_date"] != current_date:
+                current_date = task["task_date"]
+                self.list_layout.addWidget(self.section_label(f"{current_date} · 全部事项"))
+            self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task))
+
+    @staticmethod
+    def _is_past_due(values: dict) -> bool:
+        due_time = values.get("due_time")
+        task_date = values.get("task_date")
+        if not due_time or not task_date:
+            return False
+        try:
+            return datetime.strptime(f"{task_date} {due_time}", "%Y-%m-%d %H:%M") <= datetime.now()
+        except (TypeError, ValueError):
+            return False
+
+    def _skip_historical_alerts_if_needed(self, task_id: int, values: dict) -> None:
+        """Past-due items remain unfinished and overdue, but never replay alerts."""
+        if self._is_past_due(values):
+            self.db.mark_alerted(task_id, "pre")
+            self.db.mark_alerted(task_id, "due")
+
     def add_task(self) -> None:
         dialog = TaskDialog(parent=self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.db.add_task(**dialog.values())
+            values = dialog.values()
+            task_id = self.db.add_task(**values)
+            self._skip_historical_alerts_if_needed(task_id, values)
             self.render()
 
     def edit_task(self, task) -> None:
@@ -432,9 +505,11 @@ class MainWindow(QMainWindow):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             values = dialog.values()
             if dialog.duplicate_requested():
-                self.db.add_task(**values)
+                task_id = self.db.add_task(**values)
             else:
                 self.db.update_task(task["id"], **values)
+                task_id = task["id"]
+            self._skip_historical_alerts_if_needed(task_id, values)
             self.render()
 
     def set_completed(self, task_id: int, completed: bool) -> None:
@@ -560,18 +635,18 @@ class MainWindow(QMainWindow):
         self.notice.setVisible(True)
         QTimer.singleShot(10_000, lambda: self.notice.setVisible(False))
 
-    def _trigger_float(self, message: str = "") -> None:
+    def _trigger_float(self, message: str = "", *, reminder_kind: str = "task") -> None:
         if self.float_is_enabled():
             overtime_active = bool(self._overtime_header(datetime.now()))
             # Once overtime starts, the float header remains the overtime status.
             # Other reminder types may still expand the float but cannot replace it.
-            if overtime_active and message and not message.startswith("加班 "):
+            if overtime_active and message and reminder_kind != "overtime":
                 self.float_window.show_alert()
             else:
                 self.float_window.show_alert(message)
 
-    def _check_lifestyle_reminders(self, now: datetime) -> list[str]:
-        messages: list[str] = []
+    def _check_lifestyle_reminders(self, now: datetime) -> list[tuple[str, str]]:
+        messages: list[tuple[str, str]] = []
         end = self._offwork_datetime(now)
         today = now.date().isoformat()
 
@@ -590,9 +665,9 @@ class MainWindow(QMainWindow):
                 if 0 <= elapsed <= 60 and not self.db.get_setting(key):
                     self.db.set_setting(key, "1")
                     if value == "15:15":
-                        messages.append("下午三点，饮茶了先！\n你辛苦啦！")
+                        messages.append(("water", "下午三点，饮茶了先！\n你辛苦啦！"))
                     else:
-                        messages.append("喝水时间到了\n你辛苦啦！")
+                        messages.append(("water", "喝水时间到了\n你辛苦啦！"))
 
         if self.db.get_setting("meal_enabled", "0") == "1":
             for value in self._setting_list("meal_times", ["11:59", "17:59"]):
@@ -605,7 +680,7 @@ class MainWindow(QMainWindow):
                 elapsed = (now - target).total_seconds()
                 if 0 <= elapsed <= 60 and not self.db.get_setting(key):
                     self.db.set_setting(key, "1")
-                    messages.append("马上就吃饭啦\n你今天辛苦啦！")
+                    messages.append(("meal", "马上就吃饭啦\n你今天辛苦啦！"))
 
         if end and self.db.get_setting("offwork_enabled", "0") == "1":
             leads = self._setting_list(
@@ -620,7 +695,7 @@ class MainWindow(QMainWindow):
                 key = f"offwork_reminded_{today}_{lead}"
                 if 0 < seconds <= lead * 60 and not self.db.get_setting(key):
                     self.db.set_setting(key, "1")
-                    messages.append(f"还有 {lead} 分钟下班了\n你今天辛苦啦！")
+                    messages.append(("offwork", f"还有 {lead} 分钟下班了\n你今天辛苦啦！"))
 
         if end and self.db.get_setting("overtime_enabled", "1") == "1":
             cadence = int(self.db.get_setting("overtime_cadence", "30"))
@@ -631,8 +706,8 @@ class MainWindow(QMainWindow):
                 key = f"overtime_reminded_{today}_{count}_{cadence}"
                 if remainder <= 60 and not self.db.get_setting(key):
                     self.db.set_setting(key, "1")
-                    messages.append(self._overtime_reminder_message(count * cadence))
-        return [message for message in messages if message]
+                    messages.append(("overtime", self._overtime_reminder_message(count * cadence)))
+        return [(kind, message) for kind, message in messages if message]
 
     def check_reminders(self) -> None:
         now = datetime.now()
@@ -658,9 +733,10 @@ class MainWindow(QMainWindow):
             self.refresh_float()
         lifestyle = self._check_lifestyle_reminders(now)
         if lifestyle:
-            self._trigger_float(lifestyle[-1])
+            reminder_kind, message = lifestyle[-1]
+            self._trigger_float(message, reminder_kind=reminder_kind)
             if self.isVisible():
-                self.show_notice(lifestyle[-1])
+                self.show_notice(message)
 
     def finish_float_alert(self) -> None:
         self.alert_task_ids.clear()
@@ -720,12 +796,17 @@ class MainWindow(QMainWindow):
             key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as key:
                 if enabled:
-                    winreg.SetValueEx(key, "WorkTodo", 0, winreg.REG_SZ, f'"{sys.executable}" --background')
-                else:
+                    winreg.SetValueEx(key, "DaKeDesk", 0, winreg.REG_SZ, f'"{sys.executable}" --background')
                     try:
                         winreg.DeleteValue(key, "WorkTodo")
                     except FileNotFoundError:
                         pass
+                else:
+                    for value_name in ("DaKeDesk", "WorkTodo"):
+                        try:
+                            winreg.DeleteValue(key, value_name)
+                        except FileNotFoundError:
+                            pass
         except OSError:
             logging.exception("Could not update Windows auto-start setting")
 

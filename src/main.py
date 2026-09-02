@@ -1,4 +1,4 @@
-"""Work Todo V2.3.0 application entry point."""
+"""DaKe Desk V3.1 application entry point."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def install_exception_hook() -> None:
             return
         details = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
         logging.critical("Unhandled exception\n%s", details)
-        QMessageBox.critical(None, "工作待办发生错误", "程序出现异常，详细原因已写入日志。")
+        QMessageBox.critical(None, "大可桌边发生错误", "程序出现异常，详细原因已写入日志。")
 
     sys.excepthook = report_exception
 
