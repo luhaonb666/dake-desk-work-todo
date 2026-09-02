@@ -1,4 +1,4 @@
-"""Focused V3.7.1 regression checks for settings, reminders, and task views."""
+"""Focused V3.7.2 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -409,9 +409,10 @@ class V200Tests(unittest.TestCase):
         self.assertEqual(card.text.text(), "暂无固定内容")
         self.assertIn("color:#a8b1bd", card.text.styleSheet())
         self.assertIn("font-weight:400", card.text.styleSheet())
+        self.assertIn("font-size:11px", card.text.styleSheet())
         card.update_card("1", "喝水", kind="manual", source="fixed_text")
-        self.assertIn("color:#7f8b9a", card.text.styleSheet())
-        self.assertIn("font-weight:500", card.text.styleSheet())
+        self.assertIn("color:#647181", card.text.styleSheet())
+        self.assertIn("font-weight:550", card.text.styleSheet())
 
     def test_auto_collapse_choices_and_large_clickable_counter(self) -> None:
         dialog = SettingsDialog(self.db, list(MainWindow.DEFAULT_GREETINGS))

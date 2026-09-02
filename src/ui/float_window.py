@@ -117,12 +117,13 @@ class FloatCard(QFrame):
         is_empty = not bool(text)
         if is_empty:
             # Empty cards are visual placeholders, not an item demanding the
-            # user's attention. Keep them deliberately quiet.
-            text_color, font_weight = "#a8b1bd", 400
+            # user's attention. Keep them deliberately quiet and two visual
+            # size steps below a real single-line task.
+            text_color, font_weight, font_size = "#a8b1bd", 400, 11
         elif source == "fixed_text":
             # A configured empty-slot phrase is still content, just softer
-            # than a real task.  Keep it distinct from “暂无固定内容”.
-            text_color, font_weight = "#7f8b9a", 500
+            # than a real task. Keep it visibly above “暂无固定内容”.
+            text_color, font_weight = "#647181", 550
         else:
             text_color, font_weight = "#3e4854", font_weight
         self.text.setText(shown or "暂无固定内容")

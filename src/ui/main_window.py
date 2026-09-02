@@ -26,7 +26,7 @@ from ui.theme import APP_STYLE, TASK_CARD_COLORS
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "3.7.1"
+APP_VERSION = "3.7.2"
 
 
 def app_icon() -> QIcon:
