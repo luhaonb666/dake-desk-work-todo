@@ -17,7 +17,6 @@ OutputBaseFilename=DaKeDesk-Setup
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
-DefaultLanguageName=chinesesimp
 
 [Languages]
 Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
