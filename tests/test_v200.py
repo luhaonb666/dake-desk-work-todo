@@ -1,4 +1,4 @@
-"""Focused V3.6 regression checks for settings, reminders, and task views."""
+"""Focused V3.7 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -67,6 +67,7 @@ class BrandHarness:
 
 class MigrationHarness:
     _ensure_v35_float_hint = MainWindow._ensure_v35_float_hint
+    _ensure_v37_float_hint_copy = MainWindow._ensure_v37_float_hint_copy
 
     def __init__(self, db: Database) -> None:
         self.db = db
@@ -347,7 +348,7 @@ class V200Tests(unittest.TestCase):
         self.assertEqual(work_title.mapTo(dialog, work_title.rect().topLeft()).y(), dialog.end_time.mapTo(dialog, dialog.end_time.rect().topLeft()).y())
 
     def test_float_hint_migration_keeps_existing_first_phrase_in_place(self) -> None:
-        hint = "双击浮窗内容可打开主页面"
+        hint = "双击浮窗可打开主页面"
         harness = MigrationHarness(self.db)
         harness._ensure_v35_float_hint()
         self.assertEqual(self.db.get_setting("float_text_1"), hint)
@@ -357,6 +358,9 @@ class V200Tests(unittest.TestCase):
         upgraded.set_setting("float_text_2", "")
         MigrationHarness(upgraded)._ensure_v35_float_hint()
         self.assertEqual(upgraded.get_setting("float_text_1"), "保持原有第一条")
+        self.assertEqual(upgraded.get_setting("float_text_2"), hint)
+        upgraded.set_setting("float_text_2", "双击浮窗内容可打开主页面")
+        MigrationHarness(upgraded)._ensure_v37_float_hint_copy()
         self.assertEqual(upgraded.get_setting("float_text_2"), hint)
         upgraded.close()
 
@@ -373,6 +377,7 @@ class V200Tests(unittest.TestCase):
         self.assertEqual(dialog.custom_greeting.toPlainText(), "一\n二\n三")
         self.assertLessEqual(dialog.custom_greeting.document().blockCount(), 3)
         self.assertEqual(dialog.custom_greeting.minimumHeight(), dialog.custom_greeting.maximumHeight())
+        self.assertEqual(dialog.greeting.size(), dialog.custom_greeting.size())
 
     def test_database_truth_for_priority_slot_is_not_a_stale_card_copy(self) -> None:
         task_id = self.db.add_task("重点事项", "", "2026-09-01", None, False)
@@ -397,8 +402,8 @@ class V200Tests(unittest.TestCase):
         self.assertIn("color:#a8b1bd", card.text.styleSheet())
         self.assertIn("font-weight:400", card.text.styleSheet())
         card.update_card("1", "喝水", kind="manual", source="fixed_text")
-        self.assertIn("color:#778493", card.text.styleSheet())
-        self.assertIn("font-weight:600", card.text.styleSheet())
+        self.assertIn("color:#a8b1bd", card.text.styleSheet())
+        self.assertIn("font-weight:400", card.text.styleSheet())
 
     def test_auto_collapse_choices_and_large_clickable_counter(self) -> None:
         dialog = SettingsDialog(self.db, list(MainWindow.DEFAULT_GREETINGS))

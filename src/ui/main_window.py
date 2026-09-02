@@ -26,7 +26,7 @@ from ui.theme import APP_STYLE, TASK_CARD_COLORS
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "3.6"
+APP_VERSION = "3.7"
 
 
 def app_icon() -> QIcon:
@@ -113,6 +113,7 @@ class MainWindow(QMainWindow):
         self._ensure_v21_greetings()
         self._ensure_v32_greetings()
         self._ensure_v35_float_hint()
+        self._ensure_v37_float_hint_copy()
         self.setWindowTitle(f"{APP_NAME} V{APP_VERSION}")
         self.setWindowIcon(app_icon())
         self.resize(760, 760)
@@ -220,7 +221,7 @@ class MainWindow(QMainWindow):
         """
         if self.db.get_setting("float_hint_v350_seeded", "0") == "1":
             return
-        hint = "双击浮窗内容可打开主页面"
+        hint = "双击浮窗可打开主页面"
         first = self.db.get_setting("float_text_1", "").strip()
         second = self.db.get_setting("float_text_2", "").strip()
         if not first:
@@ -228,6 +229,18 @@ class MainWindow(QMainWindow):
         elif first != hint and not second:
             self.db.set_setting("float_text_2", hint)
         self.db.set_setting("float_hint_v350_seeded", "1")
+
+    def _ensure_v37_float_hint_copy(self) -> None:
+        """Shorten only the former built-in double-click wording on upgrade."""
+        if self.db.get_setting("float_hint_v370_copy_updated", "0") == "1":
+            return
+        old_hint = "双击浮窗内容可打开主页面"
+        new_hint = "双击浮窗可打开主页面"
+        for slot in range(1, 4):
+            key = f"float_text_{slot}"
+            if self.db.get_setting(key, "").strip() == old_hint:
+                self.db.set_setting(key, new_hint)
+        self.db.set_setting("float_hint_v370_copy_updated", "1")
 
     def _build_ui(self) -> None:
         root = QWidget()

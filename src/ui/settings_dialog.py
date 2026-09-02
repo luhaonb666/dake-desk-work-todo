@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import json
-import math
 from datetime import datetime
 
 from PyQt6.QtCore import QSignalBlocker, QTime, Qt, pyqtSignal
-from PyQt6.QtGui import QFontMetrics, QTextDocument
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -21,7 +19,6 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QStyle,
     QStyleOptionComboBox,
     QStylePainter,
@@ -161,7 +158,7 @@ class MultilineComboBox(NoWheelComboBox):
 
 
 class AutoHeightTextEdit(QPlainTextEdit):
-    """A fixed three-visible-line editor for float encouragement wording."""
+    """A fixed-height editor that accepts up to three intentional lines."""
 
     MAX_LINES = 3
 
@@ -177,20 +174,10 @@ class AutoHeightTextEdit(QPlainTextEdit):
         if self._trimming_lines:
             return
         text = self.toPlainText()
-        # First preserve the simple, intentional three-line rule.  Then count
-        # wrapped visual rows as well, so a very long first sentence cannot
-        # quietly turn this fixed box into a fourth or fifth displayed line.
-        candidate = "\n".join(text.splitlines()[:self.MAX_LINES])
-        # Three explicit user-entered lines are always valid.  QTextDocument
-        # includes a tiny trailing layout area after the final paragraph on
-        # some Windows fonts, so using its pixel height for that exact case
-        # would incorrectly remove an otherwise valid third line.
-        while (
-            candidate
-            and candidate.count("\n") < self.MAX_LINES - 1
-            and self._visual_line_count(candidate) > self.MAX_LINES
-        ):
-            candidate = candidate[:-1]
+        # Newlines are deliberate wording choices for the float.  The former
+        # visual-wrap measurement accidentally rejected ordinary Enter input;
+        # only a fourth explicit line should be removed.
+        candidate = "\n".join(text.split("\n")[:self.MAX_LINES])
         if candidate == text:
             return
         self._trimming_lines = True
@@ -199,17 +186,6 @@ class AutoHeightTextEdit(QPlainTextEdit):
         cursor.movePosition(cursor.MoveOperation.End)
         self.setTextCursor(cursor)
         self._trimming_lines = False
-
-    def _visual_line_count(self, text: str) -> int:
-        document = QTextDocument()
-        document.setDefaultFont(self.font())
-        document.setDocumentMargin(0)
-        width = max(1, self.viewport().width() or self.width() - 16)
-        document.setTextWidth(width)
-        document.setPlainText(text)
-        line_height = max(1, QFontMetrics(self.font()).lineSpacing())
-        return max(1, math.ceil(document.size().height() / line_height))
-
 
 class SettingsSection(QFrame):
     def __init__(self, title: str, parent=None, *, inline_heading: bool = False) -> None:
@@ -260,6 +236,7 @@ class SettingsDialog(QDialog):
     # Match meal chips exactly: a time never gets more horizontal room merely
     # because it contains a colon and four digits.
     WATER_SLOT_SIZE = (54, 31)
+    GREETING_EDITOR_SIZE = (230, 76)
 
     def __init__(self, db, greetings: list[str], parent=None) -> None:
         super().__init__(parent)
@@ -464,7 +441,7 @@ class SettingsDialog(QDialog):
     def _build_greeting_section(self, greetings: list[str]) -> None:
         section = SettingsSection("顶部鼓励语")
         self.greeting = MultilineComboBox()
-        self.greeting.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.greeting.setFixedSize(*self.GREETING_EDITOR_SIZE)
         self.greeting.addItems(greetings)
         saved = self.db.get_setting("float_greeting", greetings[0] if greetings else "")
         index = self.greeting.findText(saved)
@@ -476,7 +453,7 @@ class SettingsDialog(QDialog):
         section.add_row(self._row(self._row_label("当前鼓励语"), self.greeting, self.delete_greeting, stretch=False))
 
         self.custom_greeting = AutoHeightTextEdit()
-        self.custom_greeting.setFixedWidth(230)
+        self.custom_greeting.setFixedSize(*self.GREETING_EDITOR_SIZE)
         self.custom_greeting.setPlaceholderText("可以输入多行鼓励语\n换行会原样显示在浮窗中")
         self.save_greeting = QPushButton("保存为新鼓励语")
         self.save_greeting.setFixedWidth(118)

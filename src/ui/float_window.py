@@ -120,9 +120,9 @@ class FloatCard(QFrame):
             # user's attention. Keep them deliberately quiet.
             text_color, font_weight = "#a8b1bd", 400
         elif source == "fixed_text":
-            # A setting-authored fixed phrase is useful as a visual cue, but
-            # should remain softer than a task placed in this slot.
-            text_color, font_weight = "#778493", 600
+            # An empty-slot prompt lives behind real work.  It deliberately
+            # shares the same quiet visual level as “暂无固定内容”.
+            text_color, font_weight = "#a8b1bd", 400
         else:
             text_color, font_weight = "#3e4854", font_weight
         self.text.setText(shown or "暂无固定内容")
@@ -163,7 +163,7 @@ class FloatWindow(QWidget):
 
     def __init__(self) -> None:
         super().__init__(None)
-        self.setWindowTitle("大可桌边 V3.6 · 浮窗")
+        self.setWindowTitle("大可桌边 V3.7 · 浮窗")
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(self.EXPANDED_WIDTH)
