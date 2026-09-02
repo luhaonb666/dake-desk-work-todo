@@ -6,6 +6,12 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QComboBox, QDateEdit, QHBoxLayout, QLineEdit, QPushButton, QSpinBox, QTimeEdit, QWidget
 
 
+# One shared working-time grid.  Keeping it here prevents the task editor and
+# reminder pickers from slowly drifting into slightly different time options.
+TIME_HOURS = tuple(range(7, 23))
+TIME_MINUTES = (0, 10, 15, 20, 30, 40, 45, 50)
+
+
 class NoWheelMixin:
     def wheelEvent(self, event):  # noqa: N802
         event.ignore()

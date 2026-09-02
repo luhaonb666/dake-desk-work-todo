@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ui.controls import NoWheelComboBox, NoWheelDateEdit
+from ui.controls import NoWheelComboBox, NoWheelDateEdit, TIME_HOURS, TIME_MINUTES
 from ui.theme import APP_STYLE
 
 
@@ -95,10 +95,10 @@ class TaskDialog(QDialog):
         self.time_enabled = QCheckBox("有具体时间")
         self.time_enabled.setChecked(bool(task and task["due_time"]))
         self.hour_combo = NoWheelComboBox()
-        for hour in range(7, 23):
+        for hour in TIME_HOURS:
             self.hour_combo.addItem(f"{hour:02d} 时", hour)
         self.minute_combo = NoWheelComboBox()
-        for minute in range(0, 60, 10):
+        for minute in TIME_MINUTES:
             self.minute_combo.addItem(f"{minute:02d} 分", minute)
         if task and task["due_time"]:
             hour, minute = task["due_time"].split(":")

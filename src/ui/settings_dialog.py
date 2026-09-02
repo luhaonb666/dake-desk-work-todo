@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
     QWidgetAction,
 )
 
-from ui.controls import NoWheelComboBox, NoWheelTimeEdit, StepCounter
+from ui.controls import NoWheelComboBox, NoWheelTimeEdit, StepCounter, TIME_HOURS, TIME_MINUTES
 from ui.theme import SETTINGS_STYLE
 
 
@@ -36,8 +36,8 @@ class GuidedTimeCombo(QPushButton):
     """One compact slot that drops down the same hour/minute controls as a task."""
 
     valueChanged = pyqtSignal(str)
-    HOURS = tuple(range(7, 23))
-    MINUTES = tuple(range(0, 60, 10))
+    HOURS = TIME_HOURS
+    MINUTES = TIME_MINUTES
 
     def __init__(self, value: str = "", parent=None) -> None:
         super().__init__(parent)
@@ -187,15 +187,25 @@ class AutoHeightTextEdit(QPlainTextEdit):
 
 
 class SettingsSection(QFrame):
-    def __init__(self, title: str, parent=None) -> None:
+    def __init__(self, title: str, parent=None, *, inline_heading: bool = False) -> None:
         super().__init__(parent)
         self.setObjectName("settingsSection")
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(18, 14, 18, 16)
+        # Five compact time chips are the widest ordinary settings row.  Keep
+        # the card generous vertically but trim its side padding so the dialog
+        # stays narrow without creating a horizontal scroll bar.
+        outer.setContentsMargins(12, 14, 12, 16)
         outer.setSpacing(9)
-        heading = QLabel(title)
-        heading.setObjectName("sectionTitle")
-        outer.addWidget(heading)
+        self.heading = QLabel(title)
+        self.heading.setObjectName("sectionTitle")
+        self.heading_row = QHBoxLayout() if inline_heading else None
+        if self.heading_row is None:
+            outer.addWidget(self.heading)
+        else:
+            self.heading_row.setContentsMargins(0, 0, 0, 0)
+            self.heading_row.setSpacing(9)
+            self.heading_row.addWidget(self.heading)
+            outer.addLayout(self.heading_row)
         self.rows = QVBoxLayout()
         self.rows.setSpacing(8)
         outer.addLayout(self.rows)
@@ -208,10 +218,19 @@ class SettingsSection(QFrame):
             self.rows.addWidget(line)
         self.rows.addLayout(row)
 
+    def add_to_heading(self, *widgets: QWidget) -> None:
+        """Append compact controls beside an inline section heading."""
+        if self.heading_row is None:
+            raise RuntimeError("This settings section does not have an inline heading")
+        for widget in widgets:
+            self.heading_row.addWidget(widget)
+        self.heading_row.addStretch(1)
+
 
 class SettingsDialog(QDialog):
     OFFWORK_CHOICES = (5, 10, 15, 20, 30)
     FIXED_WATER_TIMES = ("10:15", "15:15")
+    FIXED_EYE_TIMES = ("11:35", "16:40")
     MEAL_TIMES = ("11:59", "17:59")
     # Match meal chips exactly: a time never gets more horizontal room merely
     # because it contains a colon and four digits.
@@ -222,8 +241,8 @@ class SettingsDialog(QDialog):
         self.db = db
         self.setObjectName("settingsDialog")
         self.setWindowTitle("设置")
-        self.resize(620, 720)
-        self.setMinimumSize(600, 580)
+        self.resize(560, 720)
+        self.setMinimumSize(550, 580)
         self.setStyleSheet(SETTINGS_STYLE)
 
         root = QVBoxLayout(self)
@@ -258,7 +277,9 @@ class SettingsDialog(QDialog):
     def _row_label(text: str, width: int = 112) -> QLabel:
         label = QLabel(text)
         label.setObjectName("rowLabel")
-        label.setMinimumWidth(width)
+        # Fixed labels keep the custom-greeting editor aligned with the row
+        # above instead of allowing a longer label to push it to the right.
+        label.setFixedWidth(width)
         return label
 
     @staticmethod
@@ -288,7 +309,7 @@ class SettingsDialog(QDialog):
         button.setChecked(checked)
         return button
 
-    def _water_slot_column(self, widget: QWidget, egg_text: str = "") -> QWidget:
+    def _time_slot_column(self, widget: QWidget, egg_text: str = "") -> QWidget:
         width, height = self.WATER_SLOT_SIZE
         widget.setFixedSize(width, height)
         column = QWidget()
@@ -305,14 +326,14 @@ class SettingsDialog(QDialog):
         return column
 
     def _build_work_section(self) -> None:
-        section = SettingsSection("工作与启动")
+        section = SettingsSection("工作与启动", inline_heading=True)
         self.end_time = NoWheelTimeEdit()
         self.end_time.setDisplayFormat("HH:mm")
         self.end_time.setTime(QTime.fromString(self.db.get_setting("off_work_time", "18:10"), "HH:mm"))
-        self.end_time.setMinimumWidth(150)
+        self.end_time.setFixedWidth(112)
         self.autostart = QCheckBox("开机自动启动")
         self.autostart.setChecked(self.db.get_setting("autostart", "1") == "1")
-        section.add_row(self._row(self._row_label("下班时间"), self.end_time, self.autostart))
+        section.add_to_heading(self._row_label("下班时间", 58), self.end_time, self.autostart)
         self.sections.addWidget(section)
 
     def _build_reminder_section(self) -> None:
@@ -329,15 +350,43 @@ class SettingsDialog(QDialog):
         for value in self.FIXED_WATER_TIMES:
             button = self._choice(value, value in selected_fixed)
             self.water_fixed_buttons.append(button)
-            fixed_water.append(self._water_slot_column(button, "饮茶时间！" if value == "15:15" else ""))
+            fixed_water.append(self._time_slot_column(button, "饮茶时间！" if value == "15:15" else ""))
         custom_values = self._load_json_list(self.db.get_setting("water_custom_times", ""), ["", "", ""])
         custom_values = (custom_values + ["", "", ""])[:3]
         self.water_custom = [GuidedTimeCombo(value) for value in custom_values]
         for combo in self.water_custom:
-            combo.valueChanged.connect(lambda _, changed=combo: self._prevent_duplicate_water(changed))
-        custom_water = [self._water_slot_column(combo) for combo in self.water_custom]
+            combo.valueChanged.connect(
+                lambda _, changed=combo: self._prevent_duplicate_time(
+                    changed, self.FIXED_WATER_TIMES, self.water_custom, "喝水提醒"
+                )
+            )
+        custom_water = [self._time_slot_column(combo) for combo in self.water_custom]
         water_row = self._row(self.water_enabled, *fixed_water, *custom_water)
         section.add_row(water_row)
+
+        self.eye_enabled = QCheckBox("用眼提醒")
+        self.eye_enabled.setMinimumWidth(92)
+        self.eye_enabled.setChecked(self.db.get_setting("eye_enabled", "1") == "1")
+        selected_eye = set(self._load_json_list(
+            self.db.get_setting("eye_fixed_times", ""), list(self.FIXED_EYE_TIMES)
+        ))
+        self.eye_fixed_buttons = []
+        fixed_eye = []
+        for value in self.FIXED_EYE_TIMES:
+            button = self._choice(value, value in selected_eye)
+            self.eye_fixed_buttons.append(button)
+            fixed_eye.append(self._time_slot_column(button))
+        eye_custom_values = self._load_json_list(self.db.get_setting("eye_custom_times", ""), ["", "", ""])
+        eye_custom_values = (eye_custom_values + ["", "", ""])[:3]
+        self.eye_custom = [GuidedTimeCombo(value) for value in eye_custom_values]
+        for combo in self.eye_custom:
+            combo.valueChanged.connect(
+                lambda _, changed=combo: self._prevent_duplicate_time(
+                    changed, self.FIXED_EYE_TIMES, self.eye_custom, "用眼提醒"
+                )
+            )
+        custom_eye = [self._time_slot_column(combo) for combo in self.eye_custom]
+        section.add_row(self._row(self.eye_enabled, *fixed_eye, *custom_eye), divider=True)
 
         self.meal_enabled = QCheckBox("吃饭提醒")
         self.meal_enabled.setMinimumWidth(112)
@@ -357,9 +406,11 @@ class SettingsDialog(QDialog):
         ))
         self.offwork_buttons = [self._choice(f"{value}分钟", str(value) in selected_leads) for value in self.OFFWORK_CHOICES]
         for button in self.offwork_buttons:
+            button.setFixedSize(*self.WATER_SLOT_SIZE)
             button.toggled.connect(lambda checked, changed=button: self._limit_offwork_choices(changed, checked))
         hint = QLabel("最多选2个")
         hint.setObjectName("hintLabel")
+        hint.setFixedWidth(50)
         section.add_row(self._row(self.offwork_enabled, *self.offwork_buttons, hint), divider=True)
 
         self.overtime_enabled = QCheckBox("加班提醒")
@@ -396,7 +447,10 @@ class SettingsDialog(QDialog):
         self.save_greeting = QPushButton("保存为新鼓励语")
         self.save_greeting.setFixedWidth(118)
         self.save_greeting.clicked.connect(self._save_custom_greeting)
-        section.add_row(self._row(self._row_label("自定义鼓励语"), self.custom_greeting, self.save_greeting, stretch=False), divider=True)
+        # The divider row has a tiny style margin of its own.  A 102px label
+        # compensates for it so the editable box begins on the same line as
+        # the selected encouragement above.
+        section.add_row(self._row(self._row_label("自定义鼓励语", 102), self.custom_greeting, self.save_greeting, stretch=False), divider=True)
         self.sections.addWidget(section)
 
     def _build_float_section(self) -> None:
@@ -452,15 +506,21 @@ class SettingsDialog(QDialog):
                 changed.setChecked(False)
             QMessageBox.information(self, "下班提醒", "下班提醒时间最多选2个。")
 
-    def _prevent_duplicate_water(self, changed: GuidedTimeCombo) -> None:
+    def _prevent_duplicate_time(
+        self,
+        changed: GuidedTimeCombo,
+        fixed_times: tuple[str, ...],
+        custom_times: list[GuidedTimeCombo],
+        reminder_name: str,
+    ) -> None:
         value = changed.currentData()
         if not value:
             return
-        selected = [combo.currentData() for combo in self.water_custom if combo is not changed]
-        if value in self.FIXED_WATER_TIMES or value in selected:
+        selected = [combo.currentData() for combo in custom_times if combo is not changed]
+        if value in fixed_times or value in selected:
             with QSignalBlocker(changed):
                 changed.set_value("")
-            QMessageBox.information(self, "喝水提醒", "这个时间已经存在，请选择其他时间。")
+            QMessageBox.information(self, reminder_name, "这个时间已经存在，请选择其他时间。")
 
     def _remove_greeting(self) -> None:
         index = self.greeting.currentIndex()
@@ -494,6 +554,12 @@ class SettingsDialog(QDialog):
                 if button.isChecked()
             ],
             "water_custom_times": [combo.currentData() or "" for combo in self.water_custom],
+            "eye_enabled": self.eye_enabled.isChecked(),
+            "eye_fixed_times": [
+                value for value, button in zip(self.FIXED_EYE_TIMES, self.eye_fixed_buttons)
+                if button.isChecked()
+            ],
+            "eye_custom_times": [combo.currentData() or "" for combo in self.eye_custom],
             "meal_enabled": self.meal_enabled.isChecked(),
             "meal_times": [value for value, button in zip(self.MEAL_TIMES, self.meal_buttons) if button.isChecked()],
             "offwork_enabled": self.offwork_enabled.isChecked(),

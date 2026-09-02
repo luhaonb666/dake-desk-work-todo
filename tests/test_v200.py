@@ -1,4 +1,4 @@
-"""Focused V3.4 regression checks for settings, reminders, and task views."""
+"""Focused V3.5 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -65,6 +65,13 @@ class BrandHarness:
         self.db = db
 
 
+class MigrationHarness:
+    _ensure_v35_float_hint = MainWindow._ensure_v35_float_hint
+
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+
 class V200Tests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -92,9 +99,9 @@ class V200Tests(unittest.TestCase):
         reminder_names = [
             checkbox.text()
             for checkbox in dialog.findChildren(QCheckBox)
-            if checkbox.text() in {"喝水提醒", "吃饭提醒", "下班提醒", "加班提醒"}
+            if checkbox.text() in {"喝水提醒", "用眼提醒", "吃饭提醒", "下班提醒", "加班提醒"}
         ]
-        self.assertEqual(reminder_names, ["喝水提醒", "吃饭提醒", "下班提醒", "加班提醒"])
+        self.assertEqual(reminder_names, ["喝水提醒", "用眼提醒", "吃饭提醒", "下班提醒", "加班提醒"])
         self.assertEqual(dialog.overtime_cadence.currentData(), "30")
 
     def test_custom_water_slots_match_time_grid(self) -> None:
@@ -103,13 +110,26 @@ class V200Tests(unittest.TestCase):
         for combo in dialog.water_custom:
             self.assertEqual(combo.currentData(), "")
         self.assertEqual(GuidedTimeCombo.HOURS, tuple(range(7, 23)))
-        self.assertEqual(GuidedTimeCombo.MINUTES, (0, 10, 20, 30, 40, 50))
+        self.assertEqual(GuidedTimeCombo.MINUTES, (0, 10, 15, 20, 30, 40, 45, 50))
         self.assertTrue(GuidedTimeCombo._valid_value("07:00"))
         self.assertTrue(GuidedTimeCombo._valid_value("22:50"))
         self.assertFalse(GuidedTimeCombo._valid_value("23:00"))
         dialog.water_custom[0].set_value("09:30")
         self.assertTrue(dialog.water_custom[0].property("selected"))
         self.assertEqual(dialog.water_custom[0].text(), "09:30")
+
+    def test_eye_reminder_defaults_and_copy(self) -> None:
+        dialog = SettingsDialog(self.db, list(MainWindow.DEFAULT_GREETINGS))
+        self.assertTrue(dialog.eye_enabled.isChecked())
+        self.assertEqual(dialog.values()["eye_fixed_times"], ["11:35", "16:40"])
+        self.assertEqual(len(dialog.eye_custom), 3)
+        self.db.set_setting("water_enabled", "0")
+        self.db.set_setting("meal_enabled", "0")
+        self.db.set_setting("offwork_enabled", "0")
+        self.db.set_setting("overtime_enabled", "0")
+        harness = ReminderHarness(self.db)
+        message = harness._check_lifestyle_reminders(datetime(2026, 9, 1, 11, 35, 20))
+        self.assertEqual(message, [("eye", "眼睛和你都辛苦啦\n闭上眼 按摩休息一下吧")])
 
     def test_fixed_water_times_are_individually_selectable(self) -> None:
         dialog = SettingsDialog(self.db, list(MainWindow.DEFAULT_GREETINGS))
@@ -308,9 +328,44 @@ class V200Tests(unittest.TestCase):
         )
         positions = {control.mapTo(dialog, control.rect().topLeft()).y() for control in controls}
         self.assertEqual(len(positions), 1)
-        self.assertEqual(dialog.width(), 620)
+        self.assertEqual(dialog.width(), 560)
         self.assertGreaterEqual(dialog.greeting.height(), 48)
         self.assertIn("\n", dialog.greeting.currentText())
+
+    def test_eye_slots_align_with_water_and_work_controls_share_title_row(self) -> None:
+        dialog = SettingsDialog(self.db, list(MainWindow.DEFAULT_GREETINGS))
+        dialog.show()
+        self.app.processEvents()
+        water_controls = [*dialog.water_fixed_buttons, *dialog.water_custom]
+        eye_controls = [*dialog.eye_fixed_buttons, *dialog.eye_custom]
+        self.assertEqual({(item.width(), item.height()) for item in eye_controls}, {(54, 31)})
+        water_y = {item.mapTo(dialog, item.rect().topLeft()).y() for item in water_controls}
+        eye_y = {item.mapTo(dialog, item.rect().topLeft()).y() for item in eye_controls}
+        self.assertEqual(len(water_y), 1)
+        self.assertEqual(len(eye_y), 1)
+        work_title = next(label for label in dialog.findChildren(QLabel, "sectionTitle") if label.text() == "工作与启动")
+        self.assertEqual(work_title.mapTo(dialog, work_title.rect().topLeft()).y(), dialog.end_time.mapTo(dialog, dialog.end_time.rect().topLeft()).y())
+
+    def test_float_hint_migration_keeps_existing_first_phrase_in_place(self) -> None:
+        hint = "双击浮窗内容可打开主页面"
+        harness = MigrationHarness(self.db)
+        harness._ensure_v35_float_hint()
+        self.assertEqual(self.db.get_setting("float_text_1"), hint)
+
+        upgraded = Database(Path(self.temp.name) / "upgrade.db")
+        upgraded.set_setting("float_text_1", "保持原有第一条")
+        upgraded.set_setting("float_text_2", "")
+        MigrationHarness(upgraded)._ensure_v35_float_hint()
+        self.assertEqual(upgraded.get_setting("float_text_1"), "保持原有第一条")
+        self.assertEqual(upgraded.get_setting("float_text_2"), hint)
+        upgraded.close()
+
+    def test_float_passive_mode_keeps_hover_controls_available_but_disables_clicks(self) -> None:
+        window = FloatWindow()
+        window.set_passive_mode(True)
+        self.assertFalse(window.hide_button.isEnabled())
+        window.set_passive_mode(False)
+        self.assertTrue(window.hide_button.isEnabled())
 
     def test_v320_custom_greeting_stops_at_three_lines(self) -> None:
         dialog = SettingsDialog(self.db, list(MainWindow.DEFAULT_GREETINGS))

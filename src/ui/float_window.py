@@ -163,7 +163,7 @@ class FloatWindow(QWidget):
 
     def __init__(self) -> None:
         super().__init__(None)
-        self.setWindowTitle("大可桌边 V3.4 · 浮窗")
+        self.setWindowTitle("大可桌边 V3.5 · 浮窗")
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(self.EXPANDED_WIDTH)
@@ -174,6 +174,9 @@ class FloatWindow(QWidget):
         self._dock_y: int | None = None
         self._drag_offset = None
         self._block_expand = False
+        # Dialogs can leave this desktop panel observable without allowing a
+        # second, competing action path while the form is unfinished.
+        self._passive_mode = False
         self._default_header = ""
         self._overtime_header = ""
         self._animation = QPropertyAnimation(self, b"pos", self)
@@ -253,6 +256,11 @@ class FloatWindow(QWidget):
         self._auto_collapse_ms = None if value in {None, "manual"} else int(value) * 1_000
         if self._auto_collapse_ms is None:
             self._collapse_timer.stop()
+
+    def set_passive_mode(self, enabled: bool) -> None:
+        """Keep hover/alerts active while disabling every float click action."""
+        self._passive_mode = enabled
+        self.hide_button.setEnabled(not enabled)
 
     def _start_auto_collapse(self) -> None:
         if self._auto_collapse_ms is not None:
@@ -459,16 +467,25 @@ class FloatWindow(QWidget):
         super().leaveEvent(event)
 
     def mousePressEvent(self, event):  # noqa: N802
+        if self._passive_mode:
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             event.accept()
 
     def mouseMoveEvent(self, event):  # noqa: N802
+        if self._passive_mode:
+            event.accept()
+            return
         if self._drag_offset is not None:
             self.move(event.globalPosition().toPoint() - self._drag_offset)
             event.accept()
 
     def mouseReleaseEvent(self, event):  # noqa: N802
+        if self._passive_mode:
+            event.accept()
+            return
         if self._drag_offset is not None:
             self._dock_y = self._clamped_y(self.y(), self._screen())
             self.position_changed.emit(self._dock_y)
@@ -476,5 +493,8 @@ class FloatWindow(QWidget):
         event.accept()
 
     def mouseDoubleClickEvent(self, event):  # noqa: N802
+        if self._passive_mode:
+            event.accept()
+            return
         self.open_requested.emit()
         event.accept()

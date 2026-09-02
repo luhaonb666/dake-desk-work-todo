@@ -89,7 +89,7 @@ SETTINGS_STYLE = APP_STYLE + """
     }
     QPushButton#timeSlotButton {
         background:#ffffff; border:1px solid #d8e1ee; border-radius:9px;
-        padding:7px 9px; color:#475467; font-weight:500; text-align:left;
+        padding:7px 3px; color:#475467; font-weight:500; text-align:center;
     }
     QPushButton#timeSlotButton:hover { background:#f4f7ff; border-color:#b8c9eb; }
     QPushButton#timeSlotButton[selected="true"] {

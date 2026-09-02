@@ -26,7 +26,7 @@ from ui.theme import APP_STYLE, TASK_CARD_COLORS
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "3.4"
+APP_VERSION = "3.5"
 
 
 def app_icon() -> QIcon:
@@ -112,6 +112,7 @@ class MainWindow(QMainWindow):
         self.db.ensure_settings_table()
         self._ensure_v21_greetings()
         self._ensure_v32_greetings()
+        self._ensure_v35_float_hint()
         self.setWindowTitle(f"{APP_NAME} V{APP_VERSION}")
         self.setWindowIcon(app_icon())
         self.resize(760, 760)
@@ -209,6 +210,24 @@ class MainWindow(QMainWindow):
         self.db.set_setting("saved_float_greetings", json.dumps(cleaned, ensure_ascii=False))
         self.db.set_setting("float_greeting", current)
         self.db.set_setting("greetings_v320_seeded", "1")
+
+    def _ensure_v35_float_hint(self) -> None:
+        """Seed the float's double-click hint without changing user ordering.
+
+        A new profile gets the hint in priority slot 1.  On upgrade, the first
+        user phrase stays first; the hint may use slot 2 only when slot 2 is
+        empty.  If it is occupied, there is no unobtrusive safe place for it.
+        """
+        if self.db.get_setting("float_hint_v350_seeded", "0") == "1":
+            return
+        hint = "双击浮窗内容可打开主页面"
+        first = self.db.get_setting("float_text_1", "").strip()
+        second = self.db.get_setting("float_text_2", "").strip()
+        if not first:
+            self.db.set_setting("float_text_1", hint)
+        elif first != hint and not second:
+            self.db.set_setting("float_text_2", hint)
+        self.db.set_setting("float_hint_v350_seeded", "1")
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -554,7 +573,7 @@ class MainWindow(QMainWindow):
 
     def add_task(self) -> None:
         dialog = TaskDialog(parent=self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
+        if self._run_passive_float_dialog(dialog) == QDialog.DialogCode.Accepted:
             values = dialog.values()
             task_id = self.db.add_task(**values)
             self._skip_historical_alerts_if_needed(task_id, values)
@@ -562,7 +581,7 @@ class MainWindow(QMainWindow):
 
     def edit_task(self, task) -> None:
         dialog = TaskDialog(task, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
+        if self._run_passive_float_dialog(dialog) == QDialog.DialogCode.Accepted:
             values = dialog.values()
             if dialog.duplicate_requested():
                 task_id = self.db.add_task(**values)
@@ -760,6 +779,22 @@ class MainWindow(QMainWindow):
                     else:
                         messages.append(("water", "喝水时间到了\n你辛苦啦！"))
 
+        if self.db.get_setting("eye_enabled", "1") == "1":
+            custom = [value for value in self._setting_list("eye_custom_times", ["", "", ""]) if value]
+            fixed = self._setting_list("eye_fixed_times", ["11:35", "16:40"])
+            eye_times = list(dict.fromkeys([*fixed, *custom]))
+            for value in eye_times:
+                key = f"eye_reminded_{today}_{value}"
+                try:
+                    target = datetime.strptime(f"{today} {value}", "%Y-%m-%d %H:%M")
+                except ValueError:
+                    logging.warning("Invalid eye reminder time: %s", value)
+                    continue
+                elapsed = (now - target).total_seconds()
+                if 0 <= elapsed <= 60 and not self.db.get_setting(key):
+                    self.db.set_setting(key, "1")
+                    messages.append(("eye", "眼睛和你都辛苦啦\n闭上眼 按摩休息一下吧"))
+
         if self.db.get_setting("meal_enabled", "0") == "1":
             for value in self._setting_list("meal_times", ["11:59", "17:59"]):
                 key = f"meal_reminded_{today}_{value}"
@@ -834,6 +869,19 @@ class MainWindow(QMainWindow):
         self.refresh_float()
         self.render()
 
+    def _run_passive_float_dialog(self, dialog: QDialog) -> QDialog.DialogCode:
+        """Keep the main page modal while the separate desktop float observes.
+
+        The float may still expand under the mouse and receive an alert, but it
+        cannot be dragged, collapsed or double-clicked until this dialog closes.
+        """
+        dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self.float_window.set_passive_mode(True)
+        try:
+            return dialog.exec()
+        finally:
+            self.float_window.set_passive_mode(False)
+
     def open_settings(self) -> None:
         try:
             greetings = json.loads(self.db.get_setting("saved_float_greetings", ""))
@@ -852,13 +900,16 @@ class MainWindow(QMainWindow):
         dialog.collapse_delay.currentIndexChanged.connect(
             lambda _: self.float_window.set_auto_collapse_delay(dialog.collapse_delay.currentData())
         )
-        if dialog.exec() == QDialog.DialogCode.Accepted:
+        if self._run_passive_float_dialog(dialog) == QDialog.DialogCode.Accepted:
             values = dialog.values()
             self.db.set_setting("off_work_time", values["off_work_time"])
             self.db.set_setting("autostart", "1" if values["autostart"] else "0")
             self.db.set_setting("water_enabled", "1" if values["water_enabled"] else "0")
             self.db.set_setting("water_fixed_times", json.dumps(values["water_fixed_times"]))
             self.db.set_setting("water_custom_times", json.dumps(values["water_custom_times"]))
+            self.db.set_setting("eye_enabled", "1" if values["eye_enabled"] else "0")
+            self.db.set_setting("eye_fixed_times", json.dumps(values["eye_fixed_times"]))
+            self.db.set_setting("eye_custom_times", json.dumps(values["eye_custom_times"]))
             self.db.set_setting("meal_enabled", "1" if values["meal_enabled"] else "0")
             self.db.set_setting("meal_times", json.dumps(values["meal_times"]))
             self.db.set_setting("offwork_enabled", "1" if values["offwork_enabled"] else "0")
