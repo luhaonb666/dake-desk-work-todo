@@ -458,10 +458,10 @@ class SettingsDialog(QDialog):
         self.save_greeting = QPushButton("保存为新鼓励语")
         self.save_greeting.setFixedWidth(118)
         self.save_greeting.clicked.connect(self._save_custom_greeting)
-        # The divider row has a tiny style margin of its own.  A 102px label
-        # compensates for it so the editable box begins on the same line as
-        # the selected encouragement above.
-        section.add_row(self._row(self._row_label("自定义鼓励语", 102), self.custom_greeting, self.save_greeting, stretch=False), divider=True)
+        # The divider row has a tiny style margin of its own.  A 112px label
+        # compensates for it so the editable box begins at exactly the same
+        # left edge as the selected encouragement above.
+        section.add_row(self._row(self._row_label("自定义鼓励语", 112), self.custom_greeting, self.save_greeting, stretch=False), divider=True)
         self.sections.addWidget(section)
 
     def _build_float_section(self) -> None:

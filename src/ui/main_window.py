@@ -26,7 +26,7 @@ from ui.theme import APP_STYLE, TASK_CARD_COLORS
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "3.7"
+APP_VERSION = "3.7.1"
 
 
 def app_icon() -> QIcon:
@@ -410,6 +410,9 @@ class MainWindow(QMainWindow):
         return str(int(hours)) if hours.is_integer() else str(hours)
 
     def _overtime_header(self, now: datetime) -> str:
+        # This is a work-computer model: once the configured workday reaches
+        # its end time, the header remains in overtime mode until 00:00.  A new
+        # calendar day silently starts fresh with the normal encouragement.
         end = self._offwork_datetime(now)
         if not end:
             return ""

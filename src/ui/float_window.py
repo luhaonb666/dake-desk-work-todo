@@ -120,9 +120,9 @@ class FloatCard(QFrame):
             # user's attention. Keep them deliberately quiet.
             text_color, font_weight = "#a8b1bd", 400
         elif source == "fixed_text":
-            # An empty-slot prompt lives behind real work.  It deliberately
-            # shares the same quiet visual level as “暂无固定内容”.
-            text_color, font_weight = "#a8b1bd", 400
+            # A configured empty-slot phrase is still content, just softer
+            # than a real task.  Keep it distinct from “暂无固定内容”.
+            text_color, font_weight = "#7f8b9a", 500
         else:
             text_color, font_weight = "#3e4854", font_weight
         self.text.setText(shown or "暂无固定内容")

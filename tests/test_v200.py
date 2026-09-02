@@ -1,4 +1,4 @@
-"""Focused V3.7 regression checks for settings, reminders, and task views."""
+"""Focused V3.7.1 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -241,6 +241,10 @@ class V200Tests(unittest.TestCase):
             MainWindow._overtime_header(harness, datetime(2026, 9, 1, 20, 0)),
             "加班2小时了！\n夜深了 回家注意安全哦",
         )
+        self.assertEqual(
+            MainWindow._overtime_header(harness, datetime(2026, 9, 2, 0, 0)),
+            "",
+        )
 
     def test_precise_overtime_uses_hours_and_minutes(self) -> None:
         self.assertEqual(MainWindow._format_precise_overtime(30), "已加班 30 分钟")
@@ -332,6 +336,10 @@ class V200Tests(unittest.TestCase):
         self.assertEqual(dialog.width(), 560)
         self.assertGreaterEqual(dialog.greeting.height(), 48)
         self.assertIn("\n", dialog.greeting.currentText())
+        self.assertEqual(
+            dialog.greeting.mapTo(dialog, dialog.greeting.rect().topLeft()).x(),
+            dialog.custom_greeting.mapTo(dialog, dialog.custom_greeting.rect().topLeft()).x(),
+        )
 
     def test_eye_slots_align_with_water_and_work_controls_share_title_row(self) -> None:
         dialog = SettingsDialog(self.db, list(MainWindow.DEFAULT_GREETINGS))
@@ -402,8 +410,8 @@ class V200Tests(unittest.TestCase):
         self.assertIn("color:#a8b1bd", card.text.styleSheet())
         self.assertIn("font-weight:400", card.text.styleSheet())
         card.update_card("1", "喝水", kind="manual", source="fixed_text")
-        self.assertIn("color:#a8b1bd", card.text.styleSheet())
-        self.assertIn("font-weight:400", card.text.styleSheet())
+        self.assertIn("color:#7f8b9a", card.text.styleSheet())
+        self.assertIn("font-weight:500", card.text.styleSheet())
 
     def test_auto_collapse_choices_and_large_clickable_counter(self) -> None:
         dialog = SettingsDialog(self.db, list(MainWindow.DEFAULT_GREETINGS))
