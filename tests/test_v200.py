@@ -1,4 +1,4 @@
-"""Focused V3.5 regression checks for settings, reminders, and task views."""
+"""Focused V3.6 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -372,6 +372,16 @@ class V200Tests(unittest.TestCase):
         dialog.custom_greeting.setPlainText("一\n二\n三\n四")
         self.assertEqual(dialog.custom_greeting.toPlainText(), "一\n二\n三")
         self.assertLessEqual(dialog.custom_greeting.document().blockCount(), 3)
+        self.assertEqual(dialog.custom_greeting.minimumHeight(), dialog.custom_greeting.maximumHeight())
+
+    def test_database_truth_for_priority_slot_is_not_a_stale_card_copy(self) -> None:
+        task_id = self.db.add_task("重点事项", "", "2026-09-01", None, False)
+        cached_before_assignment = dict(self.db.task_by_id(task_id))
+        self.assertIsNone(cached_before_assignment["float_slot"])
+        self.db.update_task(task_id, float_slot=2)
+        self.assertEqual(self.db.task_by_id(task_id)["float_slot"], 2)
+        # The menu now uses this current database row, not the stale copy.
+        self.assertIsNone(cached_before_assignment["float_slot"])
 
     def test_v230_single_line_float_card_is_larger_and_bolder(self) -> None:
         card = FloatCard()

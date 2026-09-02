@@ -163,7 +163,7 @@ class FloatWindow(QWidget):
 
     def __init__(self) -> None:
         super().__init__(None)
-        self.setWindowTitle("大可桌边 V3.5 · 浮窗")
+        self.setWindowTitle("大可桌边 V3.6 · 浮窗")
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(self.EXPANDED_WIDTH)

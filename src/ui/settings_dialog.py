@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime
 
 from PyQt6.QtCore import QSignalBlocker, QTime, Qt, pyqtSignal
+from PyQt6.QtGui import QFontMetrics, QTextDocument
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -159,31 +161,54 @@ class MultilineComboBox(NoWheelComboBox):
 
 
 class AutoHeightTextEdit(QPlainTextEdit):
-    """Small editor that preserves intentional line breaks, up to three lines."""
+    """A fixed three-visible-line editor for float encouragement wording."""
 
     MAX_LINES = 3
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setMinimumHeight(58)
-        self.setMaximumHeight(84)
+        self.setFixedHeight(76)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._trimming_lines = False
-        self.document().blockCountChanged.connect(self._resize_to_lines)
         self.textChanged.connect(self._limit_to_three_lines)
 
     def _limit_to_three_lines(self) -> None:
-        if self._trimming_lines or self.document().blockCount() <= self.MAX_LINES:
+        if self._trimming_lines:
+            return
+        text = self.toPlainText()
+        # First preserve the simple, intentional three-line rule.  Then count
+        # wrapped visual rows as well, so a very long first sentence cannot
+        # quietly turn this fixed box into a fourth or fifth displayed line.
+        candidate = "\n".join(text.splitlines()[:self.MAX_LINES])
+        # Three explicit user-entered lines are always valid.  QTextDocument
+        # includes a tiny trailing layout area after the final paragraph on
+        # some Windows fonts, so using its pixel height for that exact case
+        # would incorrectly remove an otherwise valid third line.
+        while (
+            candidate
+            and candidate.count("\n") < self.MAX_LINES - 1
+            and self._visual_line_count(candidate) > self.MAX_LINES
+        ):
+            candidate = candidate[:-1]
+        if candidate == text:
             return
         self._trimming_lines = True
-        self.setPlainText("\n".join(self.toPlainText().splitlines()[:self.MAX_LINES]))
+        self.setPlainText(candidate)
         cursor = self.textCursor()
         cursor.movePosition(cursor.MoveOperation.End)
         self.setTextCursor(cursor)
         self._trimming_lines = False
 
-    def _resize_to_lines(self) -> None:
-        lines = min(self.MAX_LINES, max(2, self.document().blockCount()))
-        self.setFixedHeight(min(84, 24 + lines * 20))
+    def _visual_line_count(self, text: str) -> int:
+        document = QTextDocument()
+        document.setDefaultFont(self.font())
+        document.setDocumentMargin(0)
+        width = max(1, self.viewport().width() or self.width() - 16)
+        document.setTextWidth(width)
+        document.setPlainText(text)
+        line_height = max(1, QFontMetrics(self.font()).lineSpacing())
+        return max(1, math.ceil(document.size().height() / line_height))
 
 
 class SettingsSection(QFrame):
@@ -330,7 +355,7 @@ class SettingsDialog(QDialog):
         self.end_time = NoWheelTimeEdit()
         self.end_time.setDisplayFormat("HH:mm")
         self.end_time.setTime(QTime.fromString(self.db.get_setting("off_work_time", "18:10"), "HH:mm"))
-        self.end_time.setFixedWidth(112)
+        self.end_time.setFixedWidth(92)
         self.autostart = QCheckBox("开机自动启动")
         self.autostart.setChecked(self.db.get_setting("autostart", "1") == "1")
         section.add_to_heading(self._row_label("下班时间", 58), self.end_time, self.autostart)
@@ -375,7 +400,10 @@ class SettingsDialog(QDialog):
         for value in self.FIXED_EYE_TIMES:
             button = self._choice(value, value in selected_eye)
             self.eye_fixed_buttons.append(button)
-            fixed_eye.append(self._time_slot_column(button))
+            # Unlike water, the eye row has no small themed caption above a
+            # chip.  Giving it an empty caption created a visibly taller row.
+            button.setFixedSize(*self.WATER_SLOT_SIZE)
+            fixed_eye.append(button)
         eye_custom_values = self._load_json_list(self.db.get_setting("eye_custom_times", ""), ["", "", ""])
         eye_custom_values = (eye_custom_values + ["", "", ""])[:3]
         self.eye_custom = [GuidedTimeCombo(value) for value in eye_custom_values]
@@ -385,7 +413,9 @@ class SettingsDialog(QDialog):
                     changed, self.FIXED_EYE_TIMES, self.eye_custom, "用眼提醒"
                 )
             )
-        custom_eye = [self._time_slot_column(combo) for combo in self.eye_custom]
+        for combo in self.eye_custom:
+            combo.setFixedSize(*self.WATER_SLOT_SIZE)
+        custom_eye = list(self.eye_custom)
         section.add_row(self._row(self.eye_enabled, *fixed_eye, *custom_eye), divider=True)
 
         self.meal_enabled = QCheckBox("吃饭提醒")
@@ -406,12 +436,16 @@ class SettingsDialog(QDialog):
         ))
         self.offwork_buttons = [self._choice(f"{value}分钟", str(value) in selected_leads) for value in self.OFFWORK_CHOICES]
         for button in self.offwork_buttons:
-            button.setFixedSize(*self.WATER_SLOT_SIZE)
+            # A reminder lead has four full glyphs (for example “30分钟”).
+            # It needs a little more room than a compact HH:MM time chip.
+            button.setFixedSize(58, self.WATER_SLOT_SIZE[1])
             button.toggled.connect(lambda checked, changed=button: self._limit_offwork_choices(changed, checked))
         hint = QLabel("最多选2个")
         hint.setObjectName("hintLabel")
-        hint.setFixedWidth(50)
-        section.add_row(self._row(self.offwork_enabled, *self.offwork_buttons, hint), divider=True)
+        hint.setFixedWidth(44)
+        offwork_row = self._row(self.offwork_enabled, *self.offwork_buttons, hint)
+        offwork_row.setSpacing(5)
+        section.add_row(offwork_row, divider=True)
 
         self.overtime_enabled = QCheckBox("加班提醒")
         self.overtime_enabled.setMinimumWidth(112)

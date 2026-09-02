@@ -193,6 +193,12 @@ class Database:
             ).fetchall()
         )
 
+    def task_by_id(self, task_id: int) -> sqlite3.Row | None:
+        """Read one current task row instead of trusting a rendered card copy."""
+        return self.connection.execute(
+            "SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL", (task_id,)
+        ).fetchone()
+
     def upcoming_tasks(self, today: str, limit: int = 3) -> list[sqlite3.Row]:
         return list(
             self.connection.execute(

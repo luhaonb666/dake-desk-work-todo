@@ -82,7 +82,7 @@ SETTINGS_STYLE = APP_STYLE + """
     QFrame#rowDivider { background:#e5ebf4; border:none; max-height:1px; }
     QPushButton#choiceChip {
         background:#ffffff; border:1px solid #d8e1ee; border-radius:9px;
-        padding:7px 9px; color:#475467; font-weight:500;
+        padding:7px 3px; color:#475467; font-weight:500; text-align:center;
     }
     QPushButton#choiceChip:checked {
         background:#eef2ff; border:1px solid #aebff2; color:#3f5db5; font-weight:600;

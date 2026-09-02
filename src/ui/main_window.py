@@ -26,7 +26,7 @@ from ui.theme import APP_STYLE, TASK_CARD_COLORS
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "3.5"
+APP_VERSION = "3.6"
 
 
 def app_icon() -> QIcon:
@@ -610,8 +610,13 @@ class MainWindow(QMainWindow):
             action = QAction(f"钉到桌边重点位 {slot}{suffix}", self)
             action.triggered.connect(lambda _, number=slot: self.assign_float_task(task["id"], number))
             menu.addAction(action)
-        if task["float_slot"] is not None:
-            remove = QAction("移出桌边重点位", self)
+        # The task card may have been rendered before another menu action or a
+        # refresh changed its slot.  Consult the database for the authoritative
+        # state so a truly pinned item can always be removed, while an ordinary
+        # item never gains a misleading removal action.
+        current_task = self.db.task_by_id(task["id"])
+        if current_task and current_task["float_slot"] is not None:
+            remove = QAction("移出桌边重点位（取消钉住）", self)
             remove.triggered.connect(lambda: (self.db.update_task(task["id"], float_slot=None), self.refresh_float()))
             menu.addAction(remove)
         menu.exec(self.cursor().pos())

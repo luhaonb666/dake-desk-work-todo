@@ -1,4 +1,4 @@
-"""DaKe Desk V3.5 application entry point."""
+"""DaKe Desk V3.6 application entry point."""
 
 from __future__ import annotations
 
