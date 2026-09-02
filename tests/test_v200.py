@@ -1,4 +1,4 @@
-"""Focused V3.2 regression checks for settings, reminders, and task views."""
+"""Focused V3.4 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -87,7 +87,7 @@ class V200Tests(unittest.TestCase):
         titles = [label.text() for label in dialog.findChildren(QLabel, "sectionTitle")]
         self.assertEqual(
             titles,
-            ["工作与启动", "提醒", "顶部鼓励语", "浮窗显示数量调节", "浮窗固定文字"],
+            ["工作与启动", "提醒", "顶部鼓励语", "浮窗显示数量调节", "桌边重点位"],
         )
         reminder_names = [
             checkbox.text()
@@ -324,6 +324,48 @@ class V200Tests(unittest.TestCase):
         style = card.text.styleSheet()
         self.assertIn("font-size:15px", style)
         self.assertIn("font-weight:600", style)
+
+    def test_float_placeholder_and_setting_text_have_quieter_visual_weight(self) -> None:
+        card = FloatCard()
+        card.update_card("1", "", kind="manual", source="empty")
+        self.assertEqual(card.text.text(), "暂无固定内容")
+        self.assertIn("color:#a8b1bd", card.text.styleSheet())
+        self.assertIn("font-weight:400", card.text.styleSheet())
+        card.update_card("1", "喝水", kind="manual", source="fixed_text")
+        self.assertIn("color:#778493", card.text.styleSheet())
+        self.assertIn("font-weight:600", card.text.styleSheet())
+
+    def test_auto_collapse_choices_and_large_clickable_counter(self) -> None:
+        dialog = SettingsDialog(self.db, list(MainWindow.DEFAULT_GREETINGS))
+        self.assertEqual(dialog.collapse_delay.currentData(), "4")
+        dialog.collapse_delay.setCurrentIndex(dialog.collapse_delay.findData("manual"))
+        self.assertEqual(dialog.values()["collapse_delay"], "manual")
+        original = dialog.countdown_count.value()
+        dialog.countdown_count.plus_button.click()
+        self.assertEqual(dialog.countdown_count.value(), original + 1)
+        self.assertGreaterEqual(dialog.countdown_count.plus_button.width(), 32)
+
+    def test_completed_task_automatically_leaves_desk_priority_slot(self) -> None:
+        task_id = self.db.add_task("今日重点", "", "2026-09-01", None, False)
+        self.db.update_task(task_id, float_slot=1)
+        self.assertEqual(self.db.float_tasks()[0]["float_slot"], 1)
+        self.db.set_completed(task_id, True)
+        task = self.db.tasks_for("2026-09-01")[0]
+        self.assertEqual(task["float_slot"], None)
+        self.assertEqual(self.db.float_tasks(), [])
+
+    def test_untimed_tasks_fill_the_bottom_of_countdown_slots(self) -> None:
+        def task(task_id, title, due_time=None):
+            return {"id": task_id, "title": title, "due_time": due_time}
+
+        cards = MainWindow._countdown_cards([], [task(1, "整理资料")], 3)
+        self.assertEqual([card[1] for card in cards], ["", "", "整理资料"])
+        cards = MainWindow._countdown_cards([], [task(1, "整理资料"), task(2, "联系客户")], 4)
+        self.assertEqual([card[1] for card in cards], ["", "", "整理资料", "联系客户"])
+        cards = MainWindow._countdown_cards(
+            [task(3, "15点会议", "15:00")], [task(1, "整理资料")], 3
+        )
+        self.assertEqual([card[1] for card in cards], ["15点会议", "", "整理资料"])
 
 
 if __name__ == "__main__":

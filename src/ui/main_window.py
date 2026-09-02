@@ -26,7 +26,7 @@ from ui.theme import APP_STYLE, TASK_CARD_COLORS
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "3.2"
+APP_VERSION = "3.4"
 
 
 def app_icon() -> QIcon:
@@ -81,7 +81,7 @@ class TaskCard(QFrame):
             warning.setStyleSheet("font-size:12px; color:#bd5b5b; margin-top:2px;")
             content.addWidget(warning)
         layout.addLayout(content, 1)
-        for text, callback in (("编辑", lambda: on_edit(task)), ("浮窗", lambda: on_float(task)), ("删除", lambda: on_delete(task))):
+        for text, callback in (("编辑", lambda: on_edit(task)), ("重点位", lambda: on_float(task)), ("删除", lambda: on_delete(task))):
             button = QPushButton(text)
             button.setObjectName("quietButton")
             button.clicked.connect(callback)
@@ -588,12 +588,13 @@ class MainWindow(QMainWindow):
         for slot in range(1, manual_count + 1):
             other = occupied.get(slot)
             suffix = f"（替换：{other['title']}）" if other and other["id"] != task["id"] else ""
-            action = QAction(f"放入浮窗位置 {slot}{suffix}", self)
+            action = QAction(f"钉到桌边重点位 {slot}{suffix}", self)
             action.triggered.connect(lambda _, number=slot: self.assign_float_task(task["id"], number))
             menu.addAction(action)
-        remove = QAction("从浮窗移除", self)
-        remove.triggered.connect(lambda: (self.db.update_task(task["id"], float_slot=None), self.refresh_float()))
-        menu.addAction(remove)
+        if task["float_slot"] is not None:
+            remove = QAction("移出桌边重点位", self)
+            remove.triggered.connect(lambda: (self.db.update_task(task["id"], float_slot=None), self.refresh_float()))
+            menu.addAction(remove)
         menu.exec(self.cursor().pos())
 
     def assign_float_task(self, task_id: int, slot: int) -> None:
@@ -618,12 +619,35 @@ class MainWindow(QMainWindow):
                 unique[indexes[key]] = task
         return unique
 
+    @staticmethod
+    def _countdown_cards(timed_tasks, untimed_tasks, count: int):
+        """Keep timed work at the top; use untimed work to fill bottom slots.
+
+        A task without a precise time is not a countdown item, so it must not
+        displace a timed item or jump to the top. When the countdown has room,
+        it becomes a gentle fallback at the bottom of the float.
+        """
+        timed = list(timed_tasks[:count])
+        remaining = count - len(timed)
+        untimed = list(untimed_tasks[:remaining])
+        empty = [("", "", -1, "empty")] * (remaining - len(untimed))
+        timed_cards = [(task["due_time"], task["title"], task["id"], "task") for task in timed]
+        untimed_cards = [("", task["title"], task["id"], "task") for task in untimed]
+        return timed_cards + empty + untimed_cards
+
     def refresh_float(self, countdown_count: int | None = None, manual_count: int | None = None) -> None:
         now = datetime.now()
         countdown_count = countdown_count if countdown_count is not None else int(self.db.get_setting("countdown_float_count", "3"))
         manual_count = manual_count if manual_count is not None else int(self.db.get_setting("manual_float_count", "3"))
         greeting = self.db.get_setting("float_greeting", self.DEFAULT_GREETINGS[0])
-        self.float_window.configure(greeting, countdown_count, manual_count, self._overtime_header(now))
+        auto_collapse_delay = self.db.get_setting("float_auto_collapse", "4")
+        self.float_window.configure(
+            greeting,
+            countdown_count,
+            manual_count,
+            self._overtime_header(now),
+            auto_collapse_delay,
+        )
         scheduled = [task for task in self.db.tasks_for(self.db.today(), pending_only=True) if task["due_time"]]
         past, future = [], []
         for task in scheduled:
@@ -635,14 +659,21 @@ class MainWindow(QMainWindow):
         # and due time are still identical, show only one automatic countdown
         # card so the compact float is not consumed by duplicates.
         visible = self._deduplicate_countdown_tasks(visible, self.alert_task_ids)
-        countdown = [(task["due_time"], task["title"], task["id"]) for task in visible[:countdown_count]]
-        countdown.extend([("", "", -1)] * (countdown_count - len(countdown)))
+        # Untimed work is a fallback only. It stays in the lowest available
+        # countdown positions, preserving the list order instead of competing
+        # with the time-based items above it.
+        untimed = [
+            task for task in self.db.tasks_for(self.db.today(), pending_only=True)
+            if not task["due_time"]
+        ]
+        countdown = self._countdown_cards(visible, untimed, countdown_count)
         fixed = {task["float_slot"]: task for task in self.db.float_tasks()}
         manual = []
         for slot in range(1, manual_count + 1):
             task = fixed.get(slot)
             text = task["title"] if task else self.db.get_setting(f"float_text_{slot}", "")
-            manual.append((str(slot), text))
+            source = "task" if task else ("fixed_text" if text else "empty")
+            manual.append((str(slot), text, source))
         self.float_window.set_items(countdown, manual, self.alert_task_ids)
 
     def float_is_enabled(self) -> bool:
@@ -818,6 +849,9 @@ class MainWindow(QMainWindow):
         dialog.manual_count.valueChanged.connect(
             lambda value: self.refresh_float(dialog.countdown_count.value(), value)
         )
+        dialog.collapse_delay.currentIndexChanged.connect(
+            lambda _: self.float_window.set_auto_collapse_delay(dialog.collapse_delay.currentData())
+        )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             values = dialog.values()
             self.db.set_setting("off_work_time", values["off_work_time"])
@@ -836,6 +870,7 @@ class MainWindow(QMainWindow):
             self.db.set_setting("float_greeting", values["greeting"])
             self.db.set_setting("countdown_float_count", str(values["countdown_count"]))
             self.db.set_setting("manual_float_count", str(values["manual_count"]))
+            self.db.set_setting("float_auto_collapse", str(values["collapse_delay"]))
             self.db.set_setting("float_shortcut", str(values["shortcut"]))
             for slot, text in values["fixed_texts"].items():
                 self.db.set_setting(f"float_text_{slot}", text)

@@ -98,6 +98,18 @@ SETTINGS_STYLE = APP_STYLE + """
     QLabel#easterEgg { color:#9a86bd; font-size:9px; font-weight:400; padding:0; }
     QPushButton#dangerButton { color:#7554be; border-color:#d8cdef; background:#ffffff; }
     QPushButton#dangerButton:hover { background:#f5f0ff; }
+    QWidget#stepCounter { background:transparent; }
+    QPushButton#stepDown, QPushButton#stepUp {
+        min-width:32px; max-width:32px; min-height:31px; max-height:31px;
+        padding:0; border-radius:9px; font-size:18px; font-weight:600;
+    }
+    QLineEdit#stepValue {
+        min-width:36px; max-width:36px; min-height:31px; max-height:31px;
+        padding:0; font-weight:600;
+    }
+    QPushButton#stepDown:disabled, QPushButton#stepUp:disabled {
+        background:#f3f5f8; color:#c1c9d4; border-color:#e3e8ef;
+    }
 """
 
 

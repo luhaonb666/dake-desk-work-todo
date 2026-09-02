@@ -95,7 +95,15 @@ class FloatCard(QFrame):
         self.setMaximumHeight(height)
         self.badge.set_badge_height(height - 6)
 
-    def update_card(self, badge: str, text: str, *, kind: str, highlighted: bool = False) -> None:
+    def update_card(
+        self,
+        badge: str,
+        text: str,
+        *,
+        kind: str,
+        highlighted: bool = False,
+        source: str = "task",
+    ) -> None:
         manual_break = "\n" in text
         self._kind = kind
         self._highlighted = highlighted
@@ -106,9 +114,20 @@ class FloatCard(QFrame):
         shown = text
         if not manual_break and len(text) > 12:
             shown = text[:11] + "…"
+        is_empty = not bool(text)
+        if is_empty:
+            # Empty cards are visual placeholders, not an item demanding the
+            # user's attention. Keep them deliberately quiet.
+            text_color, font_weight = "#a8b1bd", 400
+        elif source == "fixed_text":
+            # A setting-authored fixed phrase is useful as a visual cue, but
+            # should remain softer than a task placed in this slot.
+            text_color, font_weight = "#778493", 600
+        else:
+            text_color, font_weight = "#3e4854", font_weight
         self.text.setText(shown or "暂无固定内容")
         self.text.setStyleSheet(
-            f"border:none; background:transparent; color:#3e4854; font-size:{font_size}px; font-weight:{font_weight};"
+            f"border:none; background:transparent; color:{text_color}; font-size:{font_size}px; font-weight:{font_weight};"
         )
         self._apply_style()
 
@@ -144,7 +163,7 @@ class FloatWindow(QWidget):
 
     def __init__(self) -> None:
         super().__init__(None)
-        self.setWindowTitle("大可桌边 V3.2 · 浮窗")
+        self.setWindowTitle("大可桌边 V3.4 · 浮窗")
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(self.EXPANDED_WIDTH)
@@ -172,6 +191,7 @@ class FloatWindow(QWidget):
         self._alert_message = ""
         self._header_font_px = 12
         self._header_mode = "default"
+        self._auto_collapse_ms: int | None = 4_000
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(6, 6, 6, 6)
@@ -196,7 +216,15 @@ class FloatWindow(QWidget):
         self.greeting.setMinimumHeight(24)
         self._apply_header("", "default")
 
-    def configure(self, greeting: str, countdown_count: int, manual_count: int, overtime_header: str = "") -> None:
+    def configure(
+        self,
+        greeting: str,
+        countdown_count: int,
+        manual_count: int,
+        overtime_header: str = "",
+        auto_collapse_delay: str = "4",
+    ) -> None:
+        self.set_auto_collapse_delay(auto_collapse_delay)
         self._default_header = greeting
         self._overtime_header = overtime_header
         if not self._temporary_header:
@@ -219,6 +247,16 @@ class FloatWindow(QWidget):
         # receives the old spare height and turns into the large blank box shown in V1.3.
         self.adjustSize()
         self.resize(self.width(), self.sizeHint().height())
+
+    def set_auto_collapse_delay(self, value: str | int | None) -> None:
+        """Set one shared policy for hover and reminder automatic collapse."""
+        self._auto_collapse_ms = None if value in {None, "manual"} else int(value) * 1_000
+        if self._auto_collapse_ms is None:
+            self._collapse_timer.stop()
+
+    def _start_auto_collapse(self) -> None:
+        if self._auto_collapse_ms is not None:
+            self._collapse_timer.start(self._auto_collapse_ms)
 
     def _apply_header(self, text: str, mode: str) -> None:
         if mode == "alert":
@@ -284,13 +322,24 @@ class FloatWindow(QWidget):
         else:
             self._apply_header(self._default_header, "default")
 
-    def set_items(self, countdown: list[tuple[str, str, int]], manual: list[tuple[str, str]], highlighted: set[int]) -> None:
+    def set_items(
+        self,
+        countdown: list[tuple[str, str, int, str]],
+        manual: list[tuple[str, str, str]],
+        highlighted: set[int],
+    ) -> None:
         index = 0
-        for badge, text, task_id in countdown:
-            self._cards[index].update_card(badge, text, kind="countdown", highlighted=task_id in highlighted)
+        for badge, text, task_id, source in countdown:
+            self._cards[index].update_card(
+                badge,
+                text,
+                kind="countdown",
+                highlighted=task_id in highlighted,
+                source=source,
+            )
             index += 1
-        for badge, text in manual:
-            self._cards[index].update_card(badge, text, kind="manual")
+        for badge, text, source in manual:
+            self._cards[index].update_card(badge, text, kind="manual", source=source)
             index += 1
 
     def _screen(self):
@@ -370,7 +419,7 @@ class FloatWindow(QWidget):
         self._pulse_timer.start()
         self._alert_open = True
         self.expand()
-        self._collapse_timer.start(5_000)
+        self._start_auto_collapse()
 
     def _advance_pulse(self) -> None:
         self._pulse_step += 1
@@ -406,7 +455,7 @@ class FloatWindow(QWidget):
 
     def leaveEvent(self, event):  # noqa: N802
         if not self._collapsed:
-            self._collapse_timer.start(4_000)
+            self._start_auto_collapse()
         super().leaveEvent(event)
 
     def mousePressEvent(self, event):  # noqa: N802

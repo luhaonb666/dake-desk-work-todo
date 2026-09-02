@@ -145,8 +145,12 @@ class Database:
     def set_completed(self, task_id: int, completed: bool) -> None:
         now = datetime.now().isoformat(timespec="seconds") if completed else None
         self.connection.execute(
-            "UPDATE tasks SET is_completed = ?, completed_at = ?, updated_at = ? WHERE id = ?",
-            (int(completed), now, datetime.now().isoformat(timespec="seconds"), task_id),
+            """UPDATE tasks
+               SET is_completed = ?, completed_at = ?,
+                   float_slot = CASE WHEN ? = 1 THEN NULL ELSE float_slot END,
+                   updated_at = ?
+               WHERE id = ?""",
+            (int(completed), now, int(completed), datetime.now().isoformat(timespec="seconds"), task_id),
         )
         self.connection.commit()
 

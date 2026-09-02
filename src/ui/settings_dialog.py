@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
     QWidgetAction,
 )
 
-from ui.controls import NoWheelComboBox, NoWheelSpinBox, NoWheelTimeEdit
+from ui.controls import NoWheelComboBox, NoWheelTimeEdit, StepCounter
 from ui.theme import SETTINGS_STYLE
 
 
@@ -401,16 +401,22 @@ class SettingsDialog(QDialog):
 
     def _build_float_section(self) -> None:
         section = SettingsSection("浮窗显示数量调节")
-        self.countdown_count = NoWheelSpinBox()
+        self.countdown_count = StepCounter()
         self.countdown_count.setRange(3, 5)
         self.countdown_count.setValue(int(self.db.get_setting("countdown_float_count", "3")))
-        self.countdown_count.setMinimumWidth(90)
-        self.manual_count = NoWheelSpinBox()
+        self.manual_count = StepCounter()
         self.manual_count.setRange(0, 4)
         self.manual_count.setValue(int(self.db.get_setting("manual_float_count", "3")))
-        self.manual_count.setMinimumWidth(90)
         section.add_row(self._row(self._row_label("倒计时待办数量", 150), self.countdown_count))
         section.add_row(self._row(self._row_label("手动固定浮窗位数量", 150), self.manual_count), divider=True)
+        self.collapse_delay = NoWheelComboBox()
+        self.collapse_delay.addItem("4 秒（默认）", "4")
+        self.collapse_delay.addItem("10 秒", "10")
+        self.collapse_delay.addItem("仅手动收起", "manual")
+        saved_delay = self.db.get_setting("float_auto_collapse", "4")
+        self.collapse_delay.setCurrentIndex(max(0, self.collapse_delay.findData(saved_delay)))
+        self.collapse_delay.setMinimumWidth(180)
+        section.add_row(self._row(self._row_label("浮窗自动收起", 150), self.collapse_delay), divider=True)
         self.shortcut = NoWheelComboBox()
         self.shortcut.addItem("无快捷键", "none")
         self.shortcut.addItem("Alt + E（建议）", "alt+e")
@@ -421,14 +427,21 @@ class SettingsDialog(QDialog):
         self.sections.addWidget(section)
 
     def _build_fixed_text_section(self) -> None:
-        section = SettingsSection("浮窗固定文字")
+        section = SettingsSection("桌边重点位")
+        hint = QLabel(
+            "桌边重点位不是第二份待办清单，而是留给此刻最要紧事情的几个位置。\n"
+            "重点事项完成后自动腾出；空位时显示下方的提示语。"
+        )
+        hint.setObjectName("hintLabel")
+        hint.setWordWrap(True)
+        section.rows.addWidget(hint)
         self.fixed_texts: list[tuple[int, QLineEdit]] = []
         for slot in range(1, 4):
             edit = QLineEdit(self.db.get_setting(f"float_text_{slot}", ""))
-            edit.setPlaceholderText("没有指定事项时显示的固定文字")
+            edit.setPlaceholderText("空位时显示的提示语")
             self.fixed_texts.append((slot, edit))
             section.add_row(
-                self._row(self._row_label(f"浮窗位置 {slot}", 112), edit, stretch=False),
+                self._row(self._row_label(f"重点位 {slot} 提示语", 130), edit, stretch=False),
                 divider=slot > 1,
             )
         self.sections.addWidget(section)
@@ -493,6 +506,7 @@ class SettingsDialog(QDialog):
             "greeting": current_greeting,
             "countdown_count": self.countdown_count.value(),
             "manual_count": self.manual_count.value(),
+            "collapse_delay": self.collapse_delay.currentData(),
             "shortcut": self.shortcut.currentData(),
             "fixed_texts": {slot: edit.text().strip() for slot, edit in self.fixed_texts},
         }
