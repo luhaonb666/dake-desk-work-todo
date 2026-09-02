@@ -19,7 +19,7 @@ SolidCompression=yes
 WizardStyle=modern
 
 [Languages]
-Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+Name: "chinesesimp"; MessagesFile: "ChineseSimplified.isl"
 
 [Files]
 Source: "..\dist\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
