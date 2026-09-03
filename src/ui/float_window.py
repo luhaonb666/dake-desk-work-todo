@@ -76,7 +76,10 @@ class FloatCard(QFrame):
     def __init__(self) -> None:
         super().__init__()
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(5, 3, 6, 3)
+        # The left edge is the part that remains visible when the panel docks
+        # off the right side of the screen. Keep the time badge close to that
+        # edge so the compact peek can reveal a complete time, not just a sliver.
+        layout.setContentsMargins(1, 3, 6, 3)
         layout.setSpacing(3)
         self.badge = FloatBadge()
         self.text = QLabel()
@@ -158,13 +161,16 @@ class FloatWindow(QWidget):
     position_changed = pyqtSignal(int)
 
     EXPANDED_WIDTH = 208
-    PEEK_WIDTH = 22
+    # About 16% of the narrow float: enough for the left-side time badge after
+    # its padding was reduced, while remaining materially smaller than a 20%
+    # exposed panel.
+    PEEK_WIDTH = 34
     BASE_CARD_HEIGHT = 40
     MAX_UNCOMPRESSED_CARDS = 7
 
     def __init__(self) -> None:
         super().__init__(None)
-        self.setWindowTitle("大可桌边 V3.7 · 浮窗")
+        self.setWindowTitle("大可桌边 V3.9 · 浮窗")
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(self.EXPANDED_WIDTH)

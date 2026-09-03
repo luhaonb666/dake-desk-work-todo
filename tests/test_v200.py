@@ -1,4 +1,4 @@
-"""Focused V3.7.2 regression checks for settings, reminders, and task views."""
+"""Focused V3.9 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from unittest.mock import patch
 from PyQt6.QtWidgets import QApplication, QCheckBox, QLabel, QMessageBox
 
 from storage.database import Database
-from ui.main_window import MainWindow
+from ui.main_window import ExpandableNotesLabel, MainWindow
 from ui.float_window import FloatCard, FloatWindow
 from ui.settings_dialog import GuidedTimeCombo, SettingsDialog
 from ui.task_dialog import TaskDialog
@@ -445,6 +445,33 @@ class V200Tests(unittest.TestCase):
             [task(3, "15点会议", "15:00")], [task(1, "整理资料")], 3
         )
         self.assertEqual([card[1] for card in cards], ["15点会议", "", "整理资料"])
+
+    def test_task_editor_keeps_saved_note_line_breaks(self) -> None:
+        task = {
+            "title": "核对方案",
+            "notes": "第一行\n第二行\n第三行",
+            "task_date": "2026-09-01",
+            "due_time": None,
+            "is_fixed": False,
+        }
+        dialog = TaskDialog(task)
+        self.assertEqual(dialog.notes_edit.toPlainText(), task["notes"])
+        self.assertEqual(dialog.values()["notes"], task["notes"])
+
+    def test_note_summary_shows_three_lines_until_clicked(self) -> None:
+        notes = "第一行\n第二行\n第三行\n第四行"
+        label = ExpandableNotesLabel(notes)
+        self.assertEqual(label.text(), "第一行\n第二行\n第三行 …")
+        self.assertTrue(label.cursor().shape().name.endswith("PointingHandCursor"))
+        label._collapsed = False
+        label._update_text()
+        self.assertEqual(label.text(), notes)
+
+    def test_collapsed_float_keeps_time_badge_in_its_visible_left_edge(self) -> None:
+        window = FloatWindow()
+        card = FloatCard()
+        self.assertEqual(window.PEEK_WIDTH, 34)
+        self.assertLessEqual(card.layout().contentsMargins().left() + card.badge.width() + 7, window.PEEK_WIDTH)
 
 
 if __name__ == "__main__":

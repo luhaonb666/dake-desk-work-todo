@@ -81,7 +81,11 @@ class TaskDialog(QDialog):
         title_box.addWidget(self.title_edit)
         title_box.addWidget(self.title_hint)
 
-        self.notes_edit = QTextEdit(task["notes"] if task else "")
+        # QTextEdit's text-taking constructor treats the content as rich text
+        # on some Qt builds. Set plain text explicitly so saved line breaks are
+        # still line breaks when the same item is opened for editing again.
+        self.notes_edit = QTextEdit()
+        self.notes_edit.setPlainText(task["notes"] if task else "")
         self.notes_edit.setPlaceholderText("可补充说明、材料或下一步")
         self.notes_edit.setFixedHeight(100)
         self.title_edit.next_field_requested.connect(self.notes_edit.setFocus)

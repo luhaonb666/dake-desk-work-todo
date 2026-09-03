@@ -26,7 +26,7 @@ from ui.theme import APP_STYLE, TASK_CARD_COLORS
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "3.7.2"
+APP_VERSION = "3.9"
 
 
 def app_icon() -> QIcon:
@@ -41,6 +41,43 @@ def app_icon() -> QIcon:
     painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "✓")
     painter.end()
     return QIcon(pixmap)
+
+
+class ExpandableNotesLabel(QLabel):
+    """Show a compact three-line note summary that can reveal its full text."""
+
+    MAX_VISIBLE_LINES = 3
+
+    def __init__(self, notes: str, parent=None) -> None:
+        super().__init__(parent)
+        self._notes = notes
+        self._lines = notes.splitlines()
+        self._collapsed = True
+        self._expandable = len(self._lines) > self.MAX_VISIBLE_LINES
+        self.setWordWrap(True)
+        self.setStyleSheet("font-size:12px; color:#718096;")
+        if self._expandable:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.setToolTip("点击展开完整说明")
+        self._update_text()
+
+    def _update_text(self) -> None:
+        if not self._expandable or not self._collapsed:
+            self.setText(self._notes)
+            self.setToolTip("点击收起说明" if self._expandable else "")
+            return
+        shown = self._lines[:self.MAX_VISIBLE_LINES]
+        shown[-1] = f"{shown[-1]} …"
+        self.setText("\n".join(shown))
+        self.setToolTip("点击展开完整说明")
+
+    def mousePressEvent(self, event):  # noqa: N802
+        if self._expandable and event.button() == Qt.MouseButton.LeftButton:
+            self._collapsed = not self._collapsed
+            self._update_text()
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
 
 class TaskCard(QFrame):
@@ -72,9 +109,7 @@ class TaskCard(QFrame):
         )
         content.addWidget(title)
         if task["notes"]:
-            notes = QLabel(task["notes"])
-            notes.setWordWrap(True)
-            notes.setStyleSheet("font-size:12px; color:#718096;")
+            notes = ExpandableNotesLabel(task["notes"])
             content.addWidget(notes)
         if overdue:
             warning = QLabel("已超时")
