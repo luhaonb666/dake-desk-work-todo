@@ -43,8 +43,8 @@ def app_icon() -> QIcon:
     return QIcon(pixmap)
 
 
-class ExpandableNotesLabel(QLabel):
-    """Show a compact three-line note summary that can reveal its full text."""
+class ExpandableNotesWidget(QWidget):
+    """Show a compact note summary; the explicit fourth line reveals more."""
 
     MAX_VISIBLE_LINES = 3
 
@@ -54,21 +54,31 @@ class ExpandableNotesLabel(QLabel):
         self._lines = notes.splitlines()
         self._collapsed = True
         self._expandable = len(self._lines) > self.MAX_VISIBLE_LINES
-        self.setWordWrap(True)
-        self.setStyleSheet("font-size:12px; color:#718096;")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(1)
+        self.summary = QLabel()
+        self.summary.setWordWrap(True)
+        self.summary.setStyleSheet("font-size:12px; color:#718096;")
+        self.hint = QLabel()
+        self.hint.setStyleSheet("font-size:11px; color:#9ba6b5; font-weight:500;")
+        for label in (self.summary, self.hint):
+            label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            layout.addWidget(label)
         if self._expandable:
             self.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.setToolTip("点击展开完整说明")
         self._update_text()
 
     def _update_text(self) -> None:
         if not self._expandable or not self._collapsed:
-            self.setText(self._notes)
+            self.summary.setText(self._notes)
+            self.hint.setVisible(self._expandable)
+            self.hint.setText("↑ 点击收起说明" if self._expandable else "")
             self.setToolTip("点击收起说明" if self._expandable else "")
             return
-        shown = self._lines[:self.MAX_VISIBLE_LINES]
-        shown[-1] = f"{shown[-1]} …"
-        self.setText("\n".join(shown))
+        self.summary.setText("\n".join(self._lines[:self.MAX_VISIBLE_LINES]))
+        self.hint.setText("↓ 点击展开完整说明")
+        self.hint.setVisible(True)
         self.setToolTip("点击展开完整说明")
 
     def mousePressEvent(self, event):  # noqa: N802
@@ -109,7 +119,7 @@ class TaskCard(QFrame):
         )
         content.addWidget(title)
         if task["notes"]:
-            notes = ExpandableNotesLabel(task["notes"])
+            notes = ExpandableNotesWidget(task["notes"])
             content.addWidget(notes)
         if overdue:
             warning = QLabel("已超时")
@@ -803,13 +813,10 @@ class MainWindow(QMainWindow):
 
     def _trigger_float(self, message: str = "", *, reminder_kind: str = "task") -> None:
         if self.float_is_enabled():
-            overtime_active = bool(self._overtime_header(datetime.now()))
-            # Once overtime starts, the float header remains the overtime status.
-            # Other reminder types may still expand the float but cannot replace it.
-            if overtime_active and message and reminder_kind != "overtime":
-                self.float_window.show_alert()
-            else:
-                self.float_window.show_alert(message)
+            # The persistent overtime header is only the resting state. Every
+            # actual reminder owns its temporary popup copy, then the header
+            # returns to the latest overtime wording after the float collapses.
+            self.float_window.show_alert(message)
 
     def _check_lifestyle_reminders(self, now: datetime) -> list[tuple[str, str]]:
         messages: list[tuple[str, str]] = []

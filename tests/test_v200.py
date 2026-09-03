@@ -12,7 +12,7 @@ from unittest.mock import patch
 from PyQt6.QtWidgets import QApplication, QCheckBox, QLabel, QMessageBox
 
 from storage.database import Database
-from ui.main_window import ExpandableNotesLabel, MainWindow
+from ui.main_window import ExpandableNotesWidget, MainWindow
 from ui.float_window import FloatCard, FloatWindow
 from ui.settings_dialog import GuidedTimeCombo, SettingsDialog
 from ui.task_dialog import TaskDialog
@@ -202,12 +202,12 @@ class V200Tests(unittest.TestCase):
         self.assertEqual(morning, [("water", "喝水时间到了\n你辛苦啦！")])
         self.assertEqual(afternoon, [("water", "下午三点，饮茶了先！\n你辛苦啦！")])
 
-    def test_overtime_alert_type_does_not_depend_on_copy_spacing(self) -> None:
+    def test_lifestyle_alert_keeps_its_own_copy_during_overtime(self) -> None:
         harness = TriggerHarness()
         harness._trigger_float("加班5小时了！\n夜深了 回家注意安全哦", reminder_kind="overtime")
         self.assertEqual(harness.float_window.messages, ["加班5小时了！\n夜深了 回家注意安全哦"])
         harness._trigger_float("喝水时间到了\n你辛苦啦！", reminder_kind="water")
-        self.assertEqual(harness.float_window.messages[-1], "")
+        self.assertEqual(harness.float_window.messages[-1], "喝水时间到了\n你辛苦啦！")
 
     def test_overtime_copy_uses_half_hour_frequency(self) -> None:
         self.assertEqual(
@@ -458,19 +458,21 @@ class V200Tests(unittest.TestCase):
         self.assertEqual(dialog.notes_edit.toPlainText(), task["notes"])
         self.assertEqual(dialog.values()["notes"], task["notes"])
 
-    def test_note_summary_shows_three_lines_until_clicked(self) -> None:
+    def test_note_summary_shows_three_lines_with_a_clear_expand_affordance(self) -> None:
         notes = "第一行\n第二行\n第三行\n第四行"
-        label = ExpandableNotesLabel(notes)
-        self.assertEqual(label.text(), "第一行\n第二行\n第三行 …")
-        self.assertTrue(label.cursor().shape().name.endswith("PointingHandCursor"))
-        label._collapsed = False
-        label._update_text()
-        self.assertEqual(label.text(), notes)
+        widget = ExpandableNotesWidget(notes)
+        self.assertEqual(widget.summary.text(), "第一行\n第二行\n第三行")
+        self.assertEqual(widget.hint.text(), "↓ 点击展开完整说明")
+        self.assertTrue(widget.cursor().shape().name.endswith("PointingHandCursor"))
+        widget._collapsed = False
+        widget._update_text()
+        self.assertEqual(widget.summary.text(), notes)
+        self.assertEqual(widget.hint.text(), "↑ 点击收起说明")
 
     def test_collapsed_float_keeps_time_badge_in_its_visible_left_edge(self) -> None:
         window = FloatWindow()
         card = FloatCard()
-        self.assertEqual(window.PEEK_WIDTH, 34)
+        self.assertEqual(window.PEEK_WIDTH, 31)
         self.assertLessEqual(card.layout().contentsMargins().left() + card.badge.width() + 7, window.PEEK_WIDTH)
 
 

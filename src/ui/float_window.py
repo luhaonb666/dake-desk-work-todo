@@ -41,7 +41,7 @@ class FloatBadge(QWidget):
         painter.setPen(self.color)
         if ":" in self.value:
             hour, minute = self.value.split(":", 1)
-            font = self._badge_font(12)
+            font = self._badge_font(13)
             painter.setFont(font)
             half = self.height() // 2
             # V3.2 keeps hour and minute on exactly the same vertical axis. Their
@@ -161,10 +161,10 @@ class FloatWindow(QWidget):
     position_changed = pyqtSignal(int)
 
     EXPANDED_WIDTH = 208
-    # About 16% of the narrow float: enough for the left-side time badge after
-    # its padding was reduced, while remaining materially smaller than a 20%
-    # exposed panel.
-    PEEK_WIDTH = 34
+    # About 15% of the narrow float: the time badge sits tight against the
+    # left edge, so this reveals the full enlarged time without exposing card
+    # copy or a sliver of the header.
+    PEEK_WIDTH = 31
     BASE_CARD_HEIGHT = 40
     MAX_UNCOMPRESSED_CARDS = 7
 
@@ -392,6 +392,11 @@ class FloatWindow(QWidget):
         self._collapse_timer.stop()
         self._collapsed = False
         self.hide_button.setText("收起 ›")
+        self.hide_button.setVisible(True)
+        if self._temporary_header and self._alert_message:
+            self._apply_header(self._alert_message, "alert")
+        else:
+            self._restore_header()
         screen = self._screen()
         y = self._clamped_y(self.y(), screen)
         self._dock_y = y
@@ -414,6 +419,12 @@ class FloatWindow(QWidget):
             self._temporary_header = False
             self._restore_header()
             self.collapsed_after_alert.emit()
+        # The collapsed sliver is for time and priority-slot recognition, not
+        # a clipped fragment of a greeting. Keep the header's geometry stable
+        # while making its words and control unavailable off-screen.
+        self.greeting.setText("")
+        self.greeting.setStyleSheet("background:transparent; border:none;")
+        self.hide_button.setVisible(False)
 
     def manual_collapse(self) -> None:
         self.collapse(manual=True)
