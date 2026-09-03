@@ -17,12 +17,19 @@ OutputBaseFilename=DaKeDesk-Setup
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
+; Do not show Inno Setup's generic "cannot close applications" dialog.  The
+; upgrade flow below only deals with DaKeDesk.exe and explains the choice in
+; product language before any program file is replaced.
+CloseApplications=no
 
 [Languages]
 Name: "chinesesimp"; MessagesFile: "ChineseSimplified.isl"
 
 [Files]
-Source: "..\dist\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+; If a security scanner briefly keeps the executable open after the app has
+; exited, defer this one replacement until Windows restarts instead of asking
+; the user to skip the program file.
+Source: "..\dist\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion restartreplace
 
 [InstallDelete]
 Type: files; Name: "{app}\WorkTodo.exe"
@@ -53,6 +60,66 @@ begin
     Result := 'E:\大可桌边'
   else
     Result := ExpandConstant('{autopf}\大可桌边');
+end;
+
+function IsDaKeDeskRunning: Boolean;
+var
+  ResultCode: Integer;
+begin
+  { tasklist itself returns success even when it finds no matching process.
+    find changes the result to 0 only when DaKeDesk.exe is actually running. }
+  Result := Exec(
+    ExpandConstant('{sys}\cmd.exe'),
+    '/C tasklist /FI "IMAGENAME eq {#AppExeName}" /NH | find /I "{#AppExeName}" > NUL',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode
+  ) and (ResultCode = 0);
+end;
+
+function StopDaKeDeskForUpgrade: Boolean;
+var
+  ResultCode: Integer;
+  Attempt: Integer;
+begin
+  { Older releases hide when their main window is closed, so an update cannot
+    rely on the normal window-close action. This command targets only the app
+    and its child process tree, after the user has explicitly approved it. }
+  Exec(
+    ExpandConstant('{sys}\taskkill.exe'),
+    '/IM "{#AppExeName}" /T /F',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode
+  );
+
+  for Attempt := 1 to 20 do begin
+    Sleep(250);
+    if not IsDaKeDeskRunning then begin
+      Result := True;
+      exit;
+    end;
+  end;
+
+  Result := False;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  if not IsDaKeDeskRunning then
+    exit;
+
+  if MsgBox(
+    '检测到大可桌边仍在后台运行。'#13#10#13#10 +
+    '关闭主页面不会退出软件。选择“是”后，安装程序会自动退出大可桌边并继续升级。'#13#10#13#10 +
+    '已保存的待办和设置不会受影响；当前尚未保存的编辑内容将不会保留。',
+    mbConfirmation, MB_YESNO
+  ) <> IDYES then begin
+    Result := '已取消本次升级。请在方便时重新运行安装包。';
+    exit;
+  end;
+
+  if not StopDaKeDeskForUpgrade then
+    Result :=
+      '安装程序暂时无法退出大可桌边。请重启电脑后重新运行安装包；' +
+      '若仍然失败，请右键安装包并选择“以管理员身份运行”。';
 end;
 
 procedure InitializeWizard;
