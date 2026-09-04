@@ -8,8 +8,8 @@ import random
 import sys
 from datetime import datetime, timedelta
 
-from PyQt6.QtCore import QDate, QRectF, QTimer, Qt
-from PyQt6.QtGui import QAction, QBrush, QColor, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
+from PyQt6.QtCore import QDate, QTimer, Qt
+from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QFrame, QHBoxLayout, QLabel,
     QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QSystemTrayIcon,
@@ -43,36 +43,28 @@ def app_icon() -> QIcon:
     return QIcon(pixmap)
 
 
-class FadedPreviewLine(QWidget):
-    """A softly masked half-line that makes hidden notes feel continuous."""
+class FadedPreviewLine(QFrame):
+    """A native rounded container that clips a softly revealed fourth line."""
 
     def __init__(self, text: str, parent=None) -> None:
         super().__init__(parent)
         self._text = text
         self.setFixedHeight(11)
+        self.setStyleSheet(
+            "background:rgba(235,240,247,110); border:none; border-radius:7px;"
+        )
+        self.line = QLabel(self._text, self)
+        self.line.setTextFormat(Qt.TextFormat.PlainText)
+        self.line.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.line.setStyleSheet(
+            "background:transparent; border:none; color:rgba(118,132,150,145); font-size:12px;"
+        )
 
-    def _rounded_clip_path(self) -> QPainterPath:
-        path = QPainterPath()
-        # PyQt6 accepts QRectF here, not QRect. Keeping the conversion explicit
-        # avoids a repaint-time exception on Windows.
-        path.addRoundedRect(QRectF(self.rect()), 7, 7)
-        return path
-
-    def paintEvent(self, event):  # noqa: N802
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        path = self._rounded_clip_path()
-        painter.setClipPath(path)
-        painter.fillPath(path, QColor(235, 240, 247, 95))
-        gradient = QLinearGradient(0, 0, 0, self.height())
-        gradient.setColorAt(0, QColor(118, 132, 150, 165))
-        gradient.setColorAt(1, QColor(118, 132, 150, 0))
-        painter.setPen(QPen(QBrush(gradient), 1))
-        font = self.font()
-        font.setPixelSize(12)
-        painter.setFont(font)
-        painter.drawText(self.rect().adjusted(5, 0, -5, 0), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, self._text)
-        painter.end()
+    def resizeEvent(self, event):  # noqa: N802
+        # The child remains taller than this rounded frame. Qt clips it at the
+        # frame edge, yielding a calm half-line without custom paint bindings.
+        self.line.setGeometry(5, 0, max(0, self.width() - 10), 18)
+        super().resizeEvent(event)
 
 
 class ExpandableNotesWidget(QWidget):
@@ -90,10 +82,12 @@ class ExpandableNotesWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(1)
         self.summary = QLabel()
+        self.summary.setTextFormat(Qt.TextFormat.PlainText)
         self.summary.setWordWrap(True)
         self.summary.setStyleSheet("font-size:12px; color:#718096;")
         self.peek = FadedPreviewLine(self._lines[self.MAX_VISIBLE_LINES] if self._expandable else "")
         self.hint = QLabel()
+        self.hint.setTextFormat(Qt.TextFormat.PlainText)
         self.hint.setStyleSheet("font-size:11px; color:#9ba6b5; font-weight:500; padding-left:78px;")
         for label in (self.summary, self.peek, self.hint):
             label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)

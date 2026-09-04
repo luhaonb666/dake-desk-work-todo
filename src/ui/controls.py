@@ -96,11 +96,12 @@ class WeekDatePickerPanel(QWidget):
         days.setContentsMargins(0, 0, 0, 0)
         days.setSpacing(4)
         self.day_buttons: list[QPushButton] = []
-        for _ in range(7):
+        self._day_values: list[QDate] = [QDate() for _ in range(7)]
+        for index in range(7):
             button = QPushButton()
             button.setObjectName("weekDay")
             button.setCheckable(True)
-            button.clicked.connect(lambda _, item=button: self._choose(item.property("date")))
+            button.clicked.connect(lambda _, position=index: self._choose(self._day_values[position]))
             self.day_buttons.append(button)
             days.addWidget(button)
         outer.addLayout(days)
@@ -136,7 +137,7 @@ class WeekDatePickerPanel(QWidget):
             value = start.addDays(index)
             prefix = "今天" if value == today else f"周{weekdays[value.dayOfWeek() - 1]}"
             button.setText(f"{prefix}\n{value.month():02d}/{value.day():02d}")
-            button.setProperty("date", value)
+            self._day_values[index] = value
             button.setChecked(value == self._selected)
         self.date_input.setText(self._selected.toString("yyyy-MM-dd"))
 
@@ -163,7 +164,7 @@ class CompactDatePicker(QWidget):
 
     def __init__(self, value: QDate | None = None, parent=None) -> None:
         super().__init__(parent)
-        self._date = value if value and value.isValid() else QDate.currentDate()
+        self._date = value if value is not None and value.isValid() else QDate.currentDate()
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.button = QPushButton()

@@ -483,11 +483,12 @@ class V200Tests(unittest.TestCase):
         self.assertTrue(widget.peek.isHidden())
         self.assertEqual(widget.hint.text(), "↑ 点击收起说明")
 
-    def test_faded_note_preview_uses_qrectf_for_windows_painting(self) -> None:
-        # Qt6's rounded-path overload rejects QRect. This mirrors the exact
-        # Windows repaint path that renders the fourth-line fade.
+    def test_faded_note_preview_uses_native_rounded_container(self) -> None:
+        # Keep the fourth-line effect out of PyQt's platform-sensitive custom
+        # painter overloads entirely.
         preview = FadedPreviewLine("第四行")
-        self.assertFalse(preview._rounded_clip_path().isEmpty())
+        self.assertEqual(preview.line.text(), "第四行")
+        self.assertEqual(preview.height(), 11)
 
     def test_compact_date_picker_supports_shared_date_selection(self) -> None:
         picker = CompactDatePicker(QDate(2026, 9, 4))
