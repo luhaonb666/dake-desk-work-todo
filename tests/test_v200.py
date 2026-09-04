@@ -13,7 +13,7 @@ from PyQt6.QtCore import QDate, QMimeData
 from PyQt6.QtWidgets import QApplication, QCheckBox, QLabel, QMessageBox
 
 from storage.database import Database
-from ui.main_window import ExpandableNotesWidget, MainWindow
+from ui.main_window import ExpandableNotesWidget, FadedPreviewLine, MainWindow
 from ui.float_window import FloatCard, FloatWindow
 from ui.controls import CompactDatePicker, normalize_note_text
 from ui.settings_dialog import GuidedTimeCombo, SettingsDialog
@@ -482,6 +482,12 @@ class V200Tests(unittest.TestCase):
         self.assertEqual(widget.summary.text(), notes)
         self.assertTrue(widget.peek.isHidden())
         self.assertEqual(widget.hint.text(), "↑ 点击收起说明")
+
+    def test_faded_note_preview_uses_qrectf_for_windows_painting(self) -> None:
+        # Qt6's rounded-path overload rejects QRect. This mirrors the exact
+        # Windows repaint path that renders the fourth-line fade.
+        preview = FadedPreviewLine("第四行")
+        self.assertFalse(preview._rounded_clip_path().isEmpty())
 
     def test_compact_date_picker_supports_shared_date_selection(self) -> None:
         picker = CompactDatePicker(QDate(2026, 9, 4))

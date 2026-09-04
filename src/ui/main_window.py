@@ -8,7 +8,7 @@ import random
 import sys
 from datetime import datetime, timedelta
 
-from PyQt6.QtCore import QDate, QTimer, Qt
+from PyQt6.QtCore import QDate, QRectF, QTimer, Qt
 from PyQt6.QtGui import QAction, QBrush, QColor, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QFrame, QHBoxLayout, QLabel,
@@ -51,11 +51,17 @@ class FadedPreviewLine(QWidget):
         self._text = text
         self.setFixedHeight(11)
 
+    def _rounded_clip_path(self) -> QPainterPath:
+        path = QPainterPath()
+        # PyQt6 accepts QRectF here, not QRect. Keeping the conversion explicit
+        # avoids a repaint-time exception on Windows.
+        path.addRoundedRect(QRectF(self.rect()), 7, 7)
+        return path
+
     def paintEvent(self, event):  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        path = QPainterPath()
-        path.addRoundedRect(self.rect(), 7, 7)
+        path = self._rounded_clip_path()
         painter.setClipPath(path)
         painter.fillPath(path, QColor(235, 240, 247, 95))
         gradient = QLinearGradient(0, 0, 0, self.height())
