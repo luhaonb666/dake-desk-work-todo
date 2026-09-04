@@ -60,7 +60,9 @@ class FloatBadge(QWidget):
             painter.setPen(QPen(self.color, 1))
             painter.drawLine(9, half, 14, half)
         else:
-            font = self._badge_font(14)
+            # Priority-slot numbers are a touch larger than before, but remain
+            # deliberately top-aligned instead of becoming centred ornaments.
+            font = self._badge_font(15)
             painter.setFont(font)
             painter.drawText(
                 QRect(0, 1, self.width(), max(16, self.height() // 2 + 5)),
@@ -112,7 +114,9 @@ class FloatCard(QFrame):
         self._highlighted = highlighted
         self._pulse_on = False
         self._badge_text = badge
-        font_size = 11 if manual_break else 15
+        # Real, single-line work is the most useful glanceable content. Fixed
+        # fallback phrases keep their existing quieter size.
+        font_size = 11 if manual_break else (16 if source == "task" else 15)
         font_weight = 500 if manual_break else 600
         shown = text
         if not manual_break and len(text) > 12:
@@ -122,11 +126,11 @@ class FloatCard(QFrame):
             # Empty cards are visual placeholders, not an item demanding the
             # user's attention. Keep them deliberately quiet and two visual
             # size steps below a real single-line task.
-            text_color, font_weight, font_size = "#a8b1bd", 400, 11
+            text_color, font_weight, font_size = "#bac2cc", 400, 11
         elif source == "fixed_text":
             # A configured empty-slot phrase is still content, just softer
             # than a real task. Keep it visibly above “暂无固定内容”.
-            text_color, font_weight = "#647181", 550
+            text_color, font_weight = "#768393", 550
         else:
             text_color, font_weight = "#3e4854", font_weight
         self.text.setText(shown or "暂无固定内容")
@@ -170,7 +174,7 @@ class FloatWindow(QWidget):
 
     def __init__(self) -> None:
         super().__init__(None)
-        self.setWindowTitle("大可桌边 V3.9.1 · 浮窗")
+        self.setWindowTitle("大可桌边 V3.9.2 · 浮窗")
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(self.EXPANDED_WIDTH)

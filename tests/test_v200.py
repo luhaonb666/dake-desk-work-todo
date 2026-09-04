@@ -1,4 +1,4 @@
-"""Focused V3.9.1 regression checks for settings, reminders, and task views."""
+"""Focused V3.9.2 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -402,18 +402,18 @@ class V200Tests(unittest.TestCase):
         card = FloatCard()
         card.update_card("15:00", "做报价", kind="countdown")
         style = card.text.styleSheet()
-        self.assertIn("font-size:15px", style)
+        self.assertIn("font-size:16px", style)
         self.assertIn("font-weight:600", style)
 
     def test_float_placeholder_and_setting_text_have_quieter_visual_weight(self) -> None:
         card = FloatCard()
         card.update_card("1", "", kind="manual", source="empty")
         self.assertEqual(card.text.text(), "暂无固定内容")
-        self.assertIn("color:#a8b1bd", card.text.styleSheet())
+        self.assertIn("color:#bac2cc", card.text.styleSheet())
         self.assertIn("font-weight:400", card.text.styleSheet())
         self.assertIn("font-size:11px", card.text.styleSheet())
         card.update_card("1", "喝水", kind="manual", source="fixed_text")
-        self.assertIn("color:#647181", card.text.styleSheet())
+        self.assertIn("color:#768393", card.text.styleSheet())
         self.assertIn("font-weight:550", card.text.styleSheet())
 
     def test_auto_collapse_choices_and_large_clickable_counter(self) -> None:
