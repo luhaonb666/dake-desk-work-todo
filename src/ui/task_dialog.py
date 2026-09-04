@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ui.controls import NoWheelComboBox, NoWheelDateEdit, TIME_HOURS, TIME_MINUTES
+from ui.controls import CompactDatePicker, NoWheelComboBox, TIME_HOURS, TIME_MINUTES, normalize_note_text
 from ui.theme import APP_STYLE
 
 
@@ -61,6 +61,16 @@ class TitleEditor(QPlainTextEdit):
         super().keyPressEvent(event)
 
 
+class PlainNotesEditor(QTextEdit):
+    """Accept plain clipboard text only, so source formatting cannot add gaps."""
+
+    def insertFromMimeData(self, source):  # noqa: N802
+        if source.hasText():
+            self.insertPlainText(normalize_note_text(source.text()))
+            return
+        super().insertFromMimeData(source)
+
+
 class TaskDialog(QDialog):
     def __init__(self, task=None, parent=None) -> None:
         super().__init__(parent)
@@ -84,15 +94,13 @@ class TaskDialog(QDialog):
         # QTextEdit's text-taking constructor treats the content as rich text
         # on some Qt builds. Set plain text explicitly so saved line breaks are
         # still line breaks when the same item is opened for editing again.
-        self.notes_edit = QTextEdit()
-        self.notes_edit.setPlainText(task["notes"] if task else "")
+        self.notes_edit = PlainNotesEditor()
+        self.notes_edit.setPlainText(normalize_note_text(task["notes"] if task else ""))
         self.notes_edit.setPlaceholderText("可补充说明、材料或下一步")
         self.notes_edit.setFixedHeight(100)
         self.title_edit.next_field_requested.connect(self.notes_edit.setFocus)
 
-        self.date_edit = NoWheelDateEdit()
-        self.date_edit.setCalendarPopup(True)
-        self.date_edit.setDisplayFormat("yyyy 年 MM 月 dd 日")
+        self.date_edit = CompactDatePicker()
         selected = QDate.fromString(task["task_date"], "yyyy-MM-dd") if task else QDate.currentDate()
         self.date_edit.setDate(selected)
 
@@ -155,7 +163,7 @@ class TaskDialog(QDialog):
             due_time = f"{self.hour_combo.currentData():02d}:{self.minute_combo.currentData():02d}"
         return {
             "title": self.title_edit.toPlainText().strip(),
-            "notes": self.notes_edit.toPlainText().strip(),
+            "notes": normalize_note_text(self.notes_edit.toPlainText()).strip(),
             "task_date": self.date_edit.date().toString("yyyy-MM-dd"),
             "due_time": due_time,
             "is_fixed": self.fixed_check.isChecked(),

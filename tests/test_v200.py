@@ -1,4 +1,4 @@
-"""Focused V3.9 regression checks for settings, reminders, and task views."""
+"""Focused V3.9.1 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -9,13 +9,15 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
+from PyQt6.QtCore import QDate, QMimeData
 from PyQt6.QtWidgets import QApplication, QCheckBox, QLabel, QMessageBox
 
 from storage.database import Database
 from ui.main_window import ExpandableNotesWidget, MainWindow
 from ui.float_window import FloatCard, FloatWindow
+from ui.controls import CompactDatePicker, normalize_note_text
 from ui.settings_dialog import GuidedTimeCombo, SettingsDialog
-from ui.task_dialog import TaskDialog
+from ui.task_dialog import PlainNotesEditor, TaskDialog
 
 
 class FloatAlertSpy:
@@ -458,16 +460,34 @@ class V200Tests(unittest.TestCase):
         self.assertEqual(dialog.notes_edit.toPlainText(), task["notes"])
         self.assertEqual(dialog.values()["notes"], task["notes"])
 
+    def test_plain_notes_paste_ignores_rich_text_and_keeps_one_real_break(self) -> None:
+        source = QMimeData()
+        source.setHtml("<p>第一行</p><p>第二行</p>")
+        source.setText("第一行\r\n第二行")
+        editor = PlainNotesEditor()
+        editor.insertFromMimeData(source)
+        self.assertEqual(editor.toPlainText(), "第一行\n第二行")
+        self.assertEqual(normalize_note_text("一\r二\u2028三\u2029四"), "一\n二\n三\n四")
+
     def test_note_summary_shows_three_lines_with_a_clear_expand_affordance(self) -> None:
         notes = "第一行\n第二行\n第三行\n第四行"
         widget = ExpandableNotesWidget(notes)
         self.assertEqual(widget.summary.text(), "第一行\n第二行\n第三行")
+        self.assertFalse(widget.peek.isHidden())
+        self.assertEqual(widget.peek._text, "第四行")
         self.assertEqual(widget.hint.text(), "↓ 点击展开完整说明")
         self.assertTrue(widget.cursor().shape().name.endswith("PointingHandCursor"))
         widget._collapsed = False
         widget._update_text()
         self.assertEqual(widget.summary.text(), notes)
+        self.assertTrue(widget.peek.isHidden())
         self.assertEqual(widget.hint.text(), "↑ 点击收起说明")
+
+    def test_compact_date_picker_supports_shared_date_selection(self) -> None:
+        picker = CompactDatePicker(QDate(2026, 9, 4))
+        picker.setDate(QDate(2026, 9, 6))
+        self.assertEqual(picker.date(), QDate(2026, 9, 6))
+        self.assertIn("9 月 6 日", picker.button.text())
 
     def test_collapsed_float_keeps_time_badge_in_its_visible_left_edge(self) -> None:
         window = FloatWindow()

@@ -42,6 +42,9 @@ APP_STYLE = """
         font-size:12px; font-weight:500;
     }
     QPushButton#quietButton:hover { background:#edf3ff; color:#3f63c7; }
+    QPushButton#compactDateButton {
+        min-width:142px; text-align:left; padding:6px 10px; color:#475467;
+    }
     QLineEdit, QPlainTextEdit, QTextEdit, QDateEdit, QTimeEdit, QComboBox, QSpinBox {
         background:#ffffff; border:1px solid #d8e1ee; border-radius:9px;
         padding:6px 8px; color:#344054; selection-background-color:#b9caf7;

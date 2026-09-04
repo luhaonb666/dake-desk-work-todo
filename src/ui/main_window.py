@@ -9,7 +9,7 @@ import sys
 from datetime import datetime, timedelta
 
 from PyQt6.QtCore import QDate, QTimer, Qt
-from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
+from PyQt6.QtGui import QAction, QBrush, QColor, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QFrame, QHBoxLayout, QLabel,
     QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QSystemTrayIcon,
@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
 
 from app_paths import app_data_dir
 from storage.database import Database
-from ui.controls import NoWheelDateEdit
+from ui.controls import CompactDatePicker, normalize_note_text
 from ui.float_window import FloatWindow
 from ui.settings_dialog import SettingsDialog
 from ui.task_dialog import TaskDialog
@@ -26,7 +26,7 @@ from ui.theme import APP_STYLE, TASK_CARD_COLORS
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "3.9"
+APP_VERSION = "3.9.1"
 
 
 def app_icon() -> QIcon:
@@ -43,15 +43,41 @@ def app_icon() -> QIcon:
     return QIcon(pixmap)
 
 
+class FadedPreviewLine(QWidget):
+    """A softly masked half-line that makes hidden notes feel continuous."""
+
+    def __init__(self, text: str, parent=None) -> None:
+        super().__init__(parent)
+        self._text = text
+        self.setFixedHeight(11)
+
+    def paintEvent(self, event):  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(self.rect(), 7, 7)
+        painter.setClipPath(path)
+        painter.fillPath(path, QColor(235, 240, 247, 95))
+        gradient = QLinearGradient(0, 0, 0, self.height())
+        gradient.setColorAt(0, QColor(118, 132, 150, 165))
+        gradient.setColorAt(1, QColor(118, 132, 150, 0))
+        painter.setPen(QPen(QBrush(gradient), 1))
+        font = self.font()
+        font.setPixelSize(12)
+        painter.setFont(font)
+        painter.drawText(self.rect().adjusted(5, 0, -5, 0), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, self._text)
+        painter.end()
+
+
 class ExpandableNotesWidget(QWidget):
-    """Show a compact note summary; the explicit fourth line reveals more."""
+    """Show three clear lines and a gentle preview of the fourth when hidden."""
 
     MAX_VISIBLE_LINES = 3
 
     def __init__(self, notes: str, parent=None) -> None:
         super().__init__(parent)
-        self._notes = notes
-        self._lines = notes.splitlines()
+        self._notes = normalize_note_text(notes)
+        self._lines = self._notes.splitlines()
         self._collapsed = True
         self._expandable = len(self._lines) > self.MAX_VISIBLE_LINES
         layout = QVBoxLayout(self)
@@ -60,9 +86,10 @@ class ExpandableNotesWidget(QWidget):
         self.summary = QLabel()
         self.summary.setWordWrap(True)
         self.summary.setStyleSheet("font-size:12px; color:#718096;")
+        self.peek = FadedPreviewLine(self._lines[self.MAX_VISIBLE_LINES] if self._expandable else "")
         self.hint = QLabel()
-        self.hint.setStyleSheet("font-size:11px; color:#9ba6b5; font-weight:500;")
-        for label in (self.summary, self.hint):
+        self.hint.setStyleSheet("font-size:11px; color:#9ba6b5; font-weight:500; padding-left:78px;")
+        for label in (self.summary, self.peek, self.hint):
             label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             layout.addWidget(label)
         if self._expandable:
@@ -72,11 +99,13 @@ class ExpandableNotesWidget(QWidget):
     def _update_text(self) -> None:
         if not self._expandable or not self._collapsed:
             self.summary.setText(self._notes)
+            self.peek.setVisible(False)
             self.hint.setVisible(self._expandable)
             self.hint.setText("↑ 点击收起说明" if self._expandable else "")
             self.setToolTip("点击收起说明" if self._expandable else "")
             return
         self.summary.setText("\n".join(self._lines[:self.MAX_VISIBLE_LINES]))
+        self.peek.setVisible(True)
         self.hint.setText("↓ 点击展开完整说明")
         self.hint.setVisible(True)
         self.setToolTip("点击展开完整说明")
@@ -372,9 +401,7 @@ class MainWindow(QMainWindow):
         filter_label = QLabel("查看日期")
         filter_label.setStyleSheet("font-size:12px; color:#77808c; font-weight:500;")
         unfinished_filters.addWidget(filter_label)
-        self.unfinished_date = NoWheelDateEdit(QDate.currentDate())
-        self.unfinished_date.setCalendarPopup(True)
-        self.unfinished_date.setDisplayFormat("yyyy-MM-dd")
+        self.unfinished_date = CompactDatePicker(QDate.currentDate())
         self.unfinished_date.dateChanged.connect(lambda _: self.render())
         unfinished_filters.addWidget(self.unfinished_date)
         self.all_unfinished = QCheckBox("查看全部未完成")
