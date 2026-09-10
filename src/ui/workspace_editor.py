@@ -29,16 +29,16 @@ class WorkspaceEditor(QWidget):
         self._baseline: dict | None = None
         self._loading = False
 
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(16, 16, 16, 16)
-        outer.setSpacing(10)
+        self._outer_layout = QVBoxLayout(self)
+        self._outer_layout.setContentsMargins(16, 16, 16, 16)
+        self._outer_layout.setSpacing(10)
         self.heading = QLabel("选择一条事项")
         self.heading.setStyleSheet("font-size:18px; font-weight:600; color:#2c3a4d;")
-        outer.addWidget(self.heading)
+        self._outer_layout.addWidget(self.heading)
         self.hint = QLabel("从中间列表选择后可直接修改；只有点击保存才会生效。")
         self.hint.setWordWrap(True)
         self.hint.setStyleSheet("font-size:12px; color:#7b8795;")
-        outer.addWidget(self.hint)
+        self._outer_layout.addWidget(self.hint)
 
         self.form_host = QWidget()
         form = QFormLayout(self.form_host)
@@ -59,7 +59,7 @@ class WorkspaceEditor(QWidget):
 
         self.notes_edit = PlainNotesEditor()
         self.notes_edit.setPlaceholderText("可补充说明、材料或下一步")
-        self.notes_edit.setMinimumHeight(150)
+        self.notes_edit.setMinimumHeight(240)
         self.notes_edit.setAcceptRichText(False)
 
         self.date_edit = CompactDatePicker(QDate.currentDate())
@@ -98,10 +98,15 @@ class WorkspaceEditor(QWidget):
         form.addRow("时间", time_row)
         form.addRow("", self.windows_reminder_check)
         form.addRow("", self.fixed_check)
-        outer.addWidget(self.form_host, 1)
+        self._outer_layout.addWidget(self.form_host, 1)
 
-        buttons = QHBoxLayout()
+        self.action_bar = QWidget()
+        buttons = QHBoxLayout(self.action_bar)
+        buttons.setContentsMargins(16, 10, 16, 10)
         buttons.addStretch()
+        self.status_label = QLabel()
+        self.status_label.setStyleSheet("font-size:12px; color:#7c8795;")
+        buttons.addWidget(self.status_label)
         self.restore_button = QPushButton("还原未保存修改")
         self.save_button = QPushButton("保存修改")
         self.save_button.setObjectName("primaryButton")
@@ -109,9 +114,38 @@ class WorkspaceEditor(QWidget):
         self.save_button.clicked.connect(self._emit_save)
         buttons.addWidget(self.restore_button)
         buttons.addWidget(self.save_button)
-        outer.addLayout(buttons)
+        self._outer_layout.addWidget(self.action_bar)
         QShortcut(QKeySequence("Ctrl+S"), self, activated=self._emit_save)
+        self.title_edit.textChanged.connect(self._refresh_status)
+        self.notes_edit.textChanged.connect(self._refresh_status)
+        self.date_edit.dateChanged.connect(self._refresh_status)
+        self.time_enabled.toggled.connect(self._refresh_status)
+        self.hour_combo.currentIndexChanged.connect(self._refresh_status)
+        self.minute_combo.currentIndexChanged.connect(self._refresh_status)
+        self.windows_reminder_check.toggled.connect(self._refresh_status)
+        self.fixed_check.toggled.connect(self._refresh_status)
         self.clear()
+
+    def detach_action_bar(self) -> QWidget:
+        """Move Save controls outside the editor scroll area and keep them visible."""
+        self._outer_layout.removeWidget(self.action_bar)
+        self.action_bar.setParent(None)
+        return self.action_bar
+
+    def set_status_message(self, text: str, *, changed: bool = False) -> None:
+        color = "#a56e11" if changed else "#6f7d8d"
+        self.status_label.setStyleSheet(f"font-size:12px; color:{color}; font-weight:500;")
+        self.status_label.setText(text)
+
+    def _refresh_status(self, *_unused) -> None:
+        if self._loading:
+            return
+        if self._task_id is None:
+            self.set_status_message("选择一条事项后可编辑")
+        elif self.is_dirty():
+            self.set_status_message("有未保存修改", changed=True)
+        else:
+            self.set_status_message("已保存")
 
     def clear(self) -> None:
         self._loading = True
@@ -129,6 +163,7 @@ class WorkspaceEditor(QWidget):
         self.form_host.setEnabled(False)
         self.restore_button.setEnabled(False)
         self.save_button.setEnabled(False)
+        self.set_status_message("选择一条事项后可编辑")
 
     def load_task(self, task) -> None:
         if task is None:
@@ -160,6 +195,7 @@ class WorkspaceEditor(QWidget):
         self.restore_button.setEnabled(True)
         self.save_button.setEnabled(True)
         self._baseline = self.values()
+        self._refresh_status()
 
     def values(self) -> dict:
         due_time = None
@@ -194,6 +230,7 @@ class WorkspaceEditor(QWidget):
         self.windows_reminder_check.setVisible(bool(values["due_time"]))
         self.fixed_check.setChecked(values["is_fixed"])
         self._loading = False
+        self._refresh_status()
 
     def _emit_save(self) -> None:
         if self._task_id is None:
@@ -202,6 +239,7 @@ class WorkspaceEditor(QWidget):
         if not values["title"]:
             self.title_edit.setFocus()
             return
+        self.set_status_message("正在保存…")
         self.save_requested.emit(self._task_id, values)
 
     def mark_saved(self, task) -> None:

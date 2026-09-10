@@ -28,7 +28,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.0"
+APP_VERSION = "4.1"
 
 
 def app_icon() -> QIcon:
@@ -135,11 +135,8 @@ class TaskCard(QFrame):
         ) < datetime.now())
         state = "preview" if preview else ("fixed" if task["is_fixed"] else ("overdue" if overdue else "normal"))
         color, border = TASK_CARD_COLORS[state]
-        selected_border = "#5d82e6" if selected else border
-        selected_width = 2 if selected else 1
-        self.setStyleSheet(
-            f"QFrame#taskCard {{background:{color}; border:{selected_width}px solid {selected_border}; border-radius:12px;}}"
-        )
+        self._card_color, self._card_border = color, border
+        self.set_selected(selected)
         if on_select:
             self.setCursor(Qt.CursorShape.PointingHandCursor)
         layout = QHBoxLayout(self)
@@ -182,6 +179,13 @@ class TaskCard(QFrame):
             event.accept()
             return
         super().mousePressEvent(event)
+
+    def set_selected(self, selected: bool) -> None:
+        border = "#5d82e6" if selected else self._card_border
+        width = 2 if selected else 1
+        self.setStyleSheet(
+            f"QFrame#taskCard {{background:{self._card_color}; border:{width}px solid {border}; border-radius:12px;}}"
+        )
 
 
 class WorkspaceFloatPreview(QFrame):
@@ -263,6 +267,7 @@ class MainWindow(QMainWindow):
         self._ensure_v32_greetings()
         self._ensure_v35_float_hint()
         self._ensure_v37_float_hint_copy()
+        self._ensure_v41_workspace_layout()
         self.setWindowTitle(f"{APP_NAME} V{APP_VERSION}")
         self.setWindowIcon(app_icon())
         self.resize(760, 760)
@@ -393,11 +398,28 @@ class MainWindow(QMainWindow):
                 self.db.set_setting(key, new_hint)
         self.db.set_setting("float_hint_v370_copy_updated", "1")
 
+    def _ensure_v41_workspace_layout(self) -> None:
+        """Give V4.0's untouched three-column layout a roomier editor by default."""
+        if self.db.get_setting("workspace_layout_v410_seeded", "0") == "1":
+            return
+        old_default = [230, 510, 370]
+        new_default = [205, 385, 520]
+        try:
+            saved = json.loads(self.db.get_setting("workspace_splitter_sizes", ""))
+        except json.JSONDecodeError:
+            saved = None
+        if not saved or saved == old_default:
+            self.db.set_setting("workspace_splitter_sizes", json.dumps(new_default))
+        self.db.set_setting("workspace_layout_v410_seeded", "1")
+
     def _build_ui(self) -> None:
         self._workspace_active = False
         self._workspace_manual_opt_out = False
         self._workspace_scope = "today"
+        self._workspace_tab = 0
         self.workspace_selected_task_id: int | None = None
+        self._workspace_list_signature = None
+        self._workspace_cards: dict[int, TaskCard] = {}
         self.page_stack = QStackedWidget()
         self.setCentralWidget(self.page_stack)
         root = QWidget()
@@ -578,6 +600,27 @@ class MainWindow(QMainWindow):
         self.workspace_list_title = QLabel("当日事项")
         self.workspace_list_title.setStyleSheet("font-size:15px; color:#3c4b5e; font-weight:600;")
         center_layout.addWidget(self.workspace_list_title)
+        self.workspace_tabs = QTabBar()
+        self.workspace_tabs.addTab("当日")
+        self.workspace_tabs.addTab("未完成")
+        self.workspace_tabs.addTab("全部")
+        self.workspace_tabs.setStyleSheet("QTabBar::tab:last { margin-left:14px; }")
+        self.workspace_tabs.currentChanged.connect(self._set_workspace_tab)
+        center_layout.addWidget(self.workspace_tabs)
+        self.workspace_unfinished_filter_row = QWidget()
+        unfinished_filters = QHBoxLayout(self.workspace_unfinished_filter_row)
+        unfinished_filters.setContentsMargins(2, 0, 2, 2)
+        unfinished_filters.setSpacing(7)
+        unfinished_filters.addWidget(QLabel("查看日期"))
+        self.workspace_unfinished_date = CompactDatePicker(QDate.currentDate())
+        self.workspace_unfinished_date.dateChanged.connect(lambda _: self._render_workspace())
+        unfinished_filters.addWidget(self.workspace_unfinished_date)
+        self.workspace_all_unfinished = QCheckBox("查看全部未完成")
+        self.workspace_all_unfinished.toggled.connect(self._render_workspace)
+        unfinished_filters.addWidget(self.workspace_all_unfinished)
+        unfinished_filters.addStretch()
+        self.workspace_unfinished_filter_row.setVisible(False)
+        center_layout.addWidget(self.workspace_unfinished_filter_row)
         self.workspace_scroll = QScrollArea()
         self.workspace_scroll.setWidgetResizable(True)
         self.workspace_scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -598,7 +641,12 @@ class MainWindow(QMainWindow):
         self.workspace_editor = WorkspaceEditor()
         self.workspace_editor.save_requested.connect(self.save_workspace_task)
         self.workspace_editor_scroll.setWidget(self.workspace_editor)
-        right_layout.addWidget(self.workspace_editor_scroll)
+        right_layout.addWidget(self.workspace_editor_scroll, 1)
+        self.workspace_action_bar = self.workspace_editor.detach_action_bar()
+        self.workspace_action_bar.setStyleSheet(
+            "background:#f7f9fc; border-top:1px solid #dbe4ee;"
+        )
+        right_layout.addWidget(self.workspace_action_bar)
 
         self.workspace_splitter.addWidget(left)
         self.workspace_splitter.addWidget(center)
@@ -618,7 +666,7 @@ class MainWindow(QMainWindow):
                 return [int(value) for value in values]
         except (TypeError, ValueError, json.JSONDecodeError):
             pass
-        return [230, 510, 370]
+        return [205, 385, 520]
 
     def _save_workspace_splitter_sizes(self) -> None:
         self.db.set_setting("workspace_splitter_sizes", json.dumps(self.workspace_splitter.sizes()))
@@ -661,6 +709,21 @@ class MainWindow(QMainWindow):
 
     def _set_workspace_previous_scope(self, enabled: bool) -> None:
         self._workspace_scope = "previous" if enabled else "today"
+        if enabled:
+            self.workspace_tabs.blockSignals(True)
+            self.workspace_tabs.setCurrentIndex(0)
+            self.workspace_tabs.blockSignals(False)
+            self._workspace_tab = 0
+            self.workspace_unfinished_filter_row.setVisible(False)
+        self._render_workspace()
+
+    def _set_workspace_tab(self, index: int) -> None:
+        self._workspace_tab = index
+        self._workspace_scope = "today"
+        self.workspace_previous_button.blockSignals(True)
+        self.workspace_previous_button.setChecked(False)
+        self.workspace_previous_button.blockSignals(False)
+        self.workspace_unfinished_filter_row.setVisible(index == 1)
         self._render_workspace()
 
     def _workspace_should_be_active(self) -> bool:
@@ -731,10 +794,39 @@ class MainWindow(QMainWindow):
         elif self._workspace_scope == "previous":
             tasks = previous
             label = f"之前未完成（{len(tasks)}）"
+        elif self._workspace_tab == 2:
+            tasks = self.db.all_tasks()
+            label = "全部事项"
+        elif self._workspace_tab == 1:
+            if self.workspace_all_unfinished.isChecked():
+                tasks = pending
+                label = f"全部未完成（{len(tasks)}）"
+            else:
+                selected_day = self.workspace_unfinished_date.date().toString("yyyy-MM-dd")
+                tasks = self.db.tasks_for(selected_day, pending_only=True)
+                label = f"{selected_day} · 未完成"
         else:
             tasks = self.db.tasks_for(today)
             label = "当日事项"
         return tasks, label
+
+    @staticmethod
+    def _workspace_signature(label: str, tasks) -> tuple:
+        """Selection should not recreate cards, their scroll position, or note state."""
+        return (
+            label,
+            tuple(
+                (
+                    task["id"], task["title"], task["notes"], task["task_date"], task["due_time"],
+                    task["is_completed"], task["is_fixed"], task["float_slot"], task["updated_at"],
+                )
+                for task in tasks
+            ),
+        )
+
+    def _apply_workspace_selection(self) -> None:
+        for task_id, card in self._workspace_cards.items():
+            card.set_selected(task_id == self.workspace_selected_task_id)
 
     def _render_workspace(self, *_unused) -> None:
         if not hasattr(self, "workspace_list_layout"):
@@ -743,7 +835,15 @@ class MainWindow(QMainWindow):
         self._refresh_header(now)
         tasks, label = self._workspace_tasks()
         self.workspace_list_title.setText(label)
+        signature = self._workspace_signature(label, tasks)
+        if signature == self._workspace_list_signature:
+            self._apply_workspace_selection()
+            self.refresh_float()
+            return
+        scroll_value = self.workspace_scroll.verticalScrollBar().value()
         self._clear_layout(self.workspace_list_layout)
+        self._workspace_cards = {}
+        self._workspace_list_signature = signature
         if not tasks:
             message = "没有找到匹配事项。" if self.workspace_search.text().strip() else (
                 "之前没有未完成的事项。" if self._workspace_scope == "previous" else "今天还没有事项。"
@@ -768,8 +868,11 @@ class MainWindow(QMainWindow):
                     selected=task["id"] == self.workspace_selected_task_id,
                 )
                 self.workspace_list_layout.addWidget(card)
+                self._workspace_cards[int(task["id"])] = card
         self.workspace_list_layout.addStretch(1)
+        self._apply_workspace_selection()
         self.refresh_float()
+        QTimer.singleShot(0, lambda value=scroll_value: self.workspace_scroll.verticalScrollBar().setValue(value))
 
     def select_workspace_task(self, task) -> None:
         task_id = int(task["id"])
@@ -790,7 +893,7 @@ class MainWindow(QMainWindow):
             return
         self.workspace_selected_task_id = task_id
         self.workspace_editor.load_task(current)
-        self._render_workspace()
+        self._apply_workspace_selection()
 
     def save_workspace_task(self, task_id: int, values: dict) -> None:
         current = self.db.task_by_id(task_id)
@@ -805,7 +908,6 @@ class MainWindow(QMainWindow):
         updated = self.db.task_by_id(task_id)
         self.workspace_editor.mark_saved(updated)
         self._render_workspace()
-        self.show_notice("事项已保存")
 
     @staticmethod
     def section_label(text: str, top_padding: int = 12) -> QLabel:
