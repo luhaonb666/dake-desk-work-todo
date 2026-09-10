@@ -1,4 +1,4 @@
-"""Focused V3.9.2 regression checks for settings, reminders, and task views."""
+"""Focused V4.0 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -13,11 +13,13 @@ from PyQt6.QtCore import QDate, QMimeData
 from PyQt6.QtWidgets import QApplication, QCheckBox, QLabel, QMessageBox
 
 from storage.database import Database
+from services.windows_notifications import planned_reminders
 from ui.main_window import ExpandableNotesWidget, FadedPreviewLine, MainWindow
 from ui.float_window import FloatCard, FloatWindow
 from ui.controls import CompactDatePicker, normalize_note_text
 from ui.settings_dialog import GuidedTimeCombo, SettingsDialog
 from ui.task_dialog import PlainNotesEditor, TaskDialog
+from ui.workspace_editor import WorkspaceEditor
 
 
 class FloatAlertSpy:
@@ -283,6 +285,21 @@ class V200Tests(unittest.TestCase):
         dialog.duplicate_check.setChecked(True)
         self.assertTrue(dialog.duplicate_requested())
 
+    def test_workspace_editor_waits_for_explicit_save(self) -> None:
+        task_id = self.db.add_task("原事项", "第一行\n第二行", "2026-09-01", "09:00", False)
+        editor = WorkspaceEditor()
+        editor.load_task(self.db.task_by_id(task_id))
+        editor.title_edit.setPlainText("修改后事项")
+        self.assertTrue(editor.is_dirty())
+        # Editing the right-hand workspace form never writes to SQLite by itself.
+        self.assertEqual(self.db.task_by_id(task_id)["title"], "原事项")
+        saved: list[tuple[int, dict]] = []
+        editor.save_requested.connect(lambda saved_id, values: saved.append((saved_id, values)))
+        editor._emit_save()
+        self.assertEqual(saved[0][0], task_id)
+        self.assertEqual(saved[0][1]["title"], "修改后事项")
+        self.assertEqual(saved[0][1]["notes"], "第一行\n第二行")
+
     def test_past_due_task_is_not_a_new_reminder_schedule(self) -> None:
         past = {"task_date": "2026-09-01", "due_time": "09:00"}
         future = {"task_date": "2026-09-01", "due_time": "18:00"}
@@ -459,6 +476,36 @@ class V200Tests(unittest.TestCase):
         dialog = TaskDialog(task)
         self.assertEqual(dialog.notes_edit.toPlainText(), task["notes"])
         self.assertEqual(dialog.values()["notes"], task["notes"])
+
+    def test_windows_system_reminder_is_opt_in_and_requires_a_time(self) -> None:
+        dialog = TaskDialog()
+        self.assertTrue(dialog.windows_reminder_check.isHidden())
+        dialog.time_enabled.setChecked(True)
+        self.assertFalse(dialog.windows_reminder_check.isHidden())
+        self.assertFalse(dialog.windows_reminder_check.isChecked())
+        dialog.windows_reminder_check.setChecked(True)
+        self.assertTrue(dialog.values()["windows_reminder_enabled"])
+        dialog.time_enabled.setChecked(False)
+        self.assertFalse(dialog.values()["windows_reminder_enabled"])
+
+    def test_system_reminder_plan_excludes_past_and_non_opted_in_items(self) -> None:
+        enabled = self.db.add_task("重要会议", "", "2026-09-01", "10:00", False, True)
+        self.db.add_task("普通事项", "", "2026-09-01", "11:00", False, False)
+        self.db.add_task("已经过去", "", "2026-09-01", "09:00", False, True)
+        plan = planned_reminders(
+            self.db.future_windows_reminder_tasks(datetime(2026, 9, 1, 9, 30)),
+            datetime(2026, 9, 1, 9, 30),
+        )
+        self.assertEqual([(item.task_id, item.title, item.due_time) for item in plan], [(enabled, "重要会议", "10:00")])
+
+    def test_unchanged_time_does_not_rearm_a_reminder(self) -> None:
+        task_id = self.db.add_task("重要会议", "初稿", "2026-09-01", "10:00", False)
+        self.db.mark_alerted(task_id, "pre")
+        self.db.mark_alerted(task_id, "due")
+        self.db.update_task(task_id, notes="补充说明", task_date="2026-09-01", due_time="10:00")
+        task = self.db.task_by_id(task_id)
+        self.assertIsNotNone(task["pre_alerted_at"])
+        self.assertIsNotNone(task["due_alerted_at"])
 
     def test_plain_notes_paste_ignores_rich_text_and_keeps_one_real_break(self) -> None:
         source = QMimeData()

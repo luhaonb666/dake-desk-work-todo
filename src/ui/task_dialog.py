@@ -106,6 +106,19 @@ class TaskDialog(QDialog):
 
         self.time_enabled = QCheckBox("有具体时间")
         self.time_enabled.setChecked(bool(task and task["due_time"]))
+        self.windows_reminder_check = QCheckBox("重要事项：准点发送 Windows 系统提醒（需手动关闭）")
+        self.windows_reminder_check.setObjectName("windowsReminderCheck")
+        task_supports_system_reminder = bool(task and "windows_reminder_enabled" in task.keys())
+        self.windows_reminder_check.setChecked(
+            bool(task and task_supports_system_reminder and task["windows_reminder_enabled"])
+        )
+        self.windows_reminder_check.setToolTip(
+            "默认关闭。勾选后，到准点会显示 Windows 右下角提醒，并保留在通知中心。"
+        )
+        self.windows_reminder_check.setStyleSheet(
+            "QCheckBox#windowsReminderCheck { color:#2458bf; font-weight:600; padding:5px 7px; "
+            "border:1px solid #b9ccff; border-radius:8px; background:#eef4ff; }"
+        )
         self.hour_combo = NoWheelComboBox()
         for hour in TIME_HOURS:
             self.hour_combo.addItem(f"{hour:02d} 时", hour)
@@ -134,6 +147,8 @@ class TaskDialog(QDialog):
         time_box.addWidget(self.hour_combo)
         time_box.addWidget(self.minute_combo)
         time_box.addStretch()
+        self.windows_reminder_check.setVisible(self.time_enabled.isChecked())
+        self.time_enabled.toggled.connect(self.windows_reminder_check.setVisible)
 
         self.fixed_check = QCheckBox("固定钉住待办（显示在当天列表最底部）")
         self.fixed_check.setChecked(bool(task and task["is_fixed"]))
@@ -144,6 +159,7 @@ class TaskDialog(QDialog):
         form.addRow("说明", self.notes_edit)
         form.addRow("日期", self.date_edit)
         form.addRow("时间", time_box)
+        form.addRow("", self.windows_reminder_check)
         form.addRow("", self.fixed_check)
         if task:
             form.addRow("", self.duplicate_check)
@@ -167,6 +183,7 @@ class TaskDialog(QDialog):
             "task_date": self.date_edit.date().toString("yyyy-MM-dd"),
             "due_time": due_time,
             "is_fixed": self.fixed_check.isChecked(),
+            "windows_reminder_enabled": bool(due_time) and self.windows_reminder_check.isChecked(),
         }
 
     def duplicate_requested(self) -> bool:

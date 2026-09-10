@@ -1,7 +1,8 @@
 #define AppName "大可桌边"
-#define AppVersion "3.9.2"
+#define AppVersion "4.0"
 #define AppPublisher "大可"
 #define AppExeName "DaKeDesk.exe"
+#define AppAUMID "DaKe.DaKeDesk"
 
 [Setup]
 AppId={{B0BBAB27-0C46-42CD-98CD-D2F2EF906776}
@@ -41,8 +42,10 @@ Type: files; Name: "{autoprograms}\Work Todo.lnk"
 Type: files; Name: "{autoprograms}\WorkTodo.lnk"
 
 [Icons]
-Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
+; Windows uses this stable identity to associate system reminders with 大可桌边,
+; including the app name/icon shown in Notification Center.
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"; AppUserModelID: "{#AppAUMID}"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; AppUserModelID: "{#AppAUMID}"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加快捷方式："; Flags: unchecked

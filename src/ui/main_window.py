@@ -8,25 +8,27 @@ import random
 import sys
 from datetime import datetime, timedelta
 
-from PyQt6.QtCore import QDate, QTimer, Qt
+from PyQt6.QtCore import QDate, QEvent, QTimer, Qt
 from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QFrame, QHBoxLayout, QLabel,
-    QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QSystemTrayIcon,
-    QTabBar, QVBoxLayout, QWidget,
+    QLineEdit, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea,
+    QSplitter, QStackedWidget, QSystemTrayIcon, QTabBar, QVBoxLayout, QWidget,
 )
 
 from app_paths import app_data_dir
+from services.windows_notifications import WindowsReminderService
 from storage.database import Database
 from ui.controls import CompactDatePicker, normalize_note_text
 from ui.float_window import FloatWindow
 from ui.settings_dialog import SettingsDialog
 from ui.task_dialog import TaskDialog
 from ui.theme import APP_STYLE, TASK_CARD_COLORS
+from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "3.9.2"
+APP_VERSION = "4.0"
 
 
 def app_icon() -> QIcon:
@@ -120,15 +122,26 @@ class ExpandableNotesWidget(QWidget):
 
 
 class TaskCard(QFrame):
-    def __init__(self, task, on_complete, on_edit, on_float, on_delete, parent=None, preview: bool = False) -> None:
+    def __init__(
+        self, task, on_complete, on_edit, on_float, on_delete, parent=None,
+        preview: bool = False, on_select=None, selected: bool = False,
+    ) -> None:
         super().__init__(parent)
+        self._on_select = on_select
+        self._task = task
         self.setObjectName("taskCard")
         overdue = bool(task["due_time"] and not task["is_completed"] and datetime.strptime(
             f"{task['task_date']} {task['due_time']}", "%Y-%m-%d %H:%M"
         ) < datetime.now())
         state = "preview" if preview else ("fixed" if task["is_fixed"] else ("overdue" if overdue else "normal"))
         color, border = TASK_CARD_COLORS[state]
-        self.setStyleSheet(f"QFrame#taskCard {{background:{color}; border:1px solid {border}; border-radius:12px;}}")
+        selected_border = "#5d82e6" if selected else border
+        selected_width = 2 if selected else 1
+        self.setStyleSheet(
+            f"QFrame#taskCard {{background:{color}; border:{selected_width}px solid {selected_border}; border-radius:12px;}}"
+        )
+        if on_select:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 10, 10, 10)
         layout.setSpacing(10)
@@ -142,6 +155,7 @@ class TaskCard(QFrame):
         heading = f"{task['due_time']}  {task['title']}" if task["due_time"] else task["title"]
         title = QLabel(heading)
         title.setWordWrap(True)
+        title.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         title.setStyleSheet(
             "font-size:15px; font-weight:500; color:#8c939d; text-decoration:line-through;"
             if task["is_completed"] else "font-size:15px; font-weight:500; color:#26313e;"
@@ -152,6 +166,7 @@ class TaskCard(QFrame):
             content.addWidget(notes)
         if overdue:
             warning = QLabel("已超时")
+            warning.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             warning.setStyleSheet("font-size:12px; color:#bd5b5b; margin-top:2px;")
             content.addWidget(warning)
         layout.addLayout(content, 1)
@@ -160,6 +175,66 @@ class TaskCard(QFrame):
             button.setObjectName("quietButton")
             button.clicked.connect(callback)
             layout.addWidget(button, 0, Qt.AlignmentFlag.AlignTop)
+
+    def mousePressEvent(self, event):  # noqa: N802
+        if self._on_select and event.button() == Qt.MouseButton.LeftButton:
+            self._on_select(self._task)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
+class WorkspaceFloatPreview(QFrame):
+    """A read-only miniature of the live desktop float for the workspace."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("workspaceFloatPreview")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(5)
+        title = QLabel("桌边浮窗预览")
+        title.setStyleSheet("font-size:12px; font-weight:600; color:#64748b;")
+        layout.addWidget(title)
+        self.greeting = QLabel()
+        self.greeting.setWordWrap(True)
+        self.greeting.setStyleSheet(
+            "background:#edf1f5; border:1px solid #bdc8d3; border-radius:8px; "
+            "color:#415165; font-size:11px; font-weight:600; padding:4px 6px;"
+        )
+        layout.addWidget(self.greeting)
+        self.rows = QVBoxLayout()
+        self.rows.setContentsMargins(0, 0, 0, 0)
+        self.rows.setSpacing(4)
+        layout.addLayout(self.rows)
+
+    def update_from_float(self, float_window: FloatWindow) -> None:
+        header = (
+            float_window._alert_message if float_window._temporary_header and float_window._alert_message
+            else (float_window._overtime_header or float_window._default_header)
+        )
+        self.greeting.setText(header or "顶部鼓励语")
+        while self.rows.count():
+            item = self.rows.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for card in float_window._cards:
+            row = QFrame()
+            background = "#fff7e8" if card._kind == "countdown" else "#f5f7fa"
+            row.setStyleSheet(f"background:{background}; border:1px solid #d9e0e8; border-radius:8px;")
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(5, 3, 6, 3)
+            row_layout.setSpacing(5)
+            badge = QLabel(card._badge_text)
+            badge.setFixedWidth(22)
+            badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            badge.setStyleSheet("font-size:11px; font-weight:600; color:#687789;")
+            text = QLabel(card.text.text())
+            text.setWordWrap(True)
+            text.setStyleSheet("font-size:11px; color:#586575;")
+            row_layout.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
+            row_layout.addWidget(text, 1)
+            self.rows.addWidget(row)
 
 
 class MainWindow(QMainWindow):
@@ -200,6 +275,7 @@ class MainWindow(QMainWindow):
         if stored_y.isdigit():
             self.float_window.set_dock_y(int(stored_y))
         self.alert_task_ids: set[int] = set()
+        self.windows_reminders = WindowsReminderService()
         self.hotkey_manager = None
         self._build_ui()
         self._build_tray()
@@ -212,6 +288,7 @@ class MainWindow(QMainWindow):
         self.brand_timer.timeout.connect(self._refresh_brand_at_hour)
         self._schedule_next_brand_hour()
         self.render()
+        self._sync_windows_reminders()
         QTimer.singleShot(250, self.restore_float)
         QTimer.singleShot(1_000, self.check_reminders)
 
@@ -317,9 +394,16 @@ class MainWindow(QMainWindow):
         self.db.set_setting("float_hint_v370_copy_updated", "1")
 
     def _build_ui(self) -> None:
+        self._workspace_active = False
+        self._workspace_manual_opt_out = False
+        self._workspace_scope = "today"
+        self.workspace_selected_task_id: int | None = None
+        self.page_stack = QStackedWidget()
+        self.setCentralWidget(self.page_stack)
         root = QWidget()
+        self.standard_page = root
         root.setObjectName("root")
-        self.setCentralWidget(root)
+        self.page_stack.addWidget(root)
         outer = QVBoxLayout(root)
         outer.setContentsMargins(22, 18, 22, 18)
         outer.setSpacing(12)
@@ -354,7 +438,7 @@ class MainWindow(QMainWindow):
         settings_button = QPushButton("设置")
         settings_button.clicked.connect(self.open_settings)
         header.addWidget(settings_button)
-        fullscreen = QPushButton("全屏")
+        fullscreen = QPushButton("全屏编辑")
         fullscreen.clicked.connect(self.toggle_fullscreen)
         header.addWidget(fullscreen)
         header_outer.addLayout(header)
@@ -425,7 +509,119 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(APP_STYLE + """
             QFrame#chromePanel { background:#f4f7fc; border:1px solid #dce6f5; border-radius:14px; }
             QFrame#previewArea { background:#e9ecef; border:1px solid #dde1e5; border-radius:13px; }
+            QFrame#workspaceFloatPreview { background:#f4f7fb; border:1px solid #dbe4f0; border-radius:12px; }
         """)
+        self._build_workspace_ui()
+
+    def _build_workspace_ui(self) -> None:
+        """Build the larger, deliberate editing space without disturbing the main page."""
+        self.workspace_page = QWidget()
+        self.workspace_page.setObjectName("workspacePage")
+        outer = QVBoxLayout(self.workspace_page)
+        outer.setContentsMargins(18, 16, 18, 18)
+        outer.setSpacing(10)
+
+        header = QFrame()
+        header.setObjectName("chromePanel")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(15, 10, 12, 10)
+        heading_box = QVBoxLayout()
+        heading_box.setContentsMargins(0, 0, 0, 0)
+        heading_box.setSpacing(2)
+        heading = QLabel("大可桌边 · 全屏编辑")
+        heading.setStyleSheet("font-size:20px; font-weight:600; color:#2d3c50;")
+        subheading = QLabel("在中间选择事项，在右侧安心修改；点击保存后才会生效。")
+        subheading.setStyleSheet("font-size:12px; color:#778495;")
+        heading_box.addWidget(heading)
+        heading_box.addWidget(subheading)
+        header_layout.addLayout(heading_box, 1)
+        add = QPushButton("+ 添加事项")
+        add.setObjectName("primaryButton")
+        add.clicked.connect(self.add_task)
+        self.workspace_exit_button = QPushButton("退出全屏编辑")
+        self.workspace_exit_button.clicked.connect(self.exit_workspace)
+        header_layout.addWidget(add)
+        header_layout.addWidget(self.workspace_exit_button)
+        outer.addWidget(header)
+
+        self.workspace_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.workspace_splitter.setChildrenCollapsible(False)
+        self.workspace_splitter.setHandleWidth(7)
+
+        left = QFrame()
+        left.setObjectName("chromePanel")
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(12, 12, 12, 12)
+        left_layout.setSpacing(9)
+        scope = QLabel("查找与回顾")
+        scope.setStyleSheet("font-size:13px; color:#536273; font-weight:600;")
+        left_layout.addWidget(scope)
+        self.workspace_search = QLineEdit()
+        self.workspace_search.setPlaceholderText("搜索标题或说明")
+        self.workspace_search.setClearButtonEnabled(True)
+        self.workspace_search.textChanged.connect(self._render_workspace)
+        left_layout.addWidget(self.workspace_search)
+        self.workspace_previous_button = QPushButton("之前未完成")
+        self.workspace_previous_button.setCheckable(True)
+        self.workspace_previous_button.setToolTip("查看今天之前仍未完成的事项")
+        self.workspace_previous_button.toggled.connect(self._set_workspace_previous_scope)
+        left_layout.addWidget(self.workspace_previous_button)
+        left_layout.addStretch(1)
+        self.workspace_float_preview = WorkspaceFloatPreview()
+        left_layout.addWidget(self.workspace_float_preview)
+
+        center = QFrame()
+        center.setObjectName("chromePanel")
+        center_layout = QVBoxLayout(center)
+        center_layout.setContentsMargins(12, 12, 12, 12)
+        center_layout.setSpacing(7)
+        self.workspace_list_title = QLabel("当日事项")
+        self.workspace_list_title.setStyleSheet("font-size:15px; color:#3c4b5e; font-weight:600;")
+        center_layout.addWidget(self.workspace_list_title)
+        self.workspace_scroll = QScrollArea()
+        self.workspace_scroll.setWidgetResizable(True)
+        self.workspace_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.workspace_list_host = QWidget()
+        self.workspace_list_layout = QVBoxLayout(self.workspace_list_host)
+        self.workspace_list_layout.setContentsMargins(0, 2, 0, 2)
+        self.workspace_list_layout.setSpacing(5)
+        self.workspace_scroll.setWidget(self.workspace_list_host)
+        center_layout.addWidget(self.workspace_scroll, 1)
+
+        right = QFrame()
+        right.setObjectName("chromePanel")
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        self.workspace_editor_scroll = QScrollArea()
+        self.workspace_editor_scroll.setWidgetResizable(True)
+        self.workspace_editor_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.workspace_editor = WorkspaceEditor()
+        self.workspace_editor.save_requested.connect(self.save_workspace_task)
+        self.workspace_editor_scroll.setWidget(self.workspace_editor)
+        right_layout.addWidget(self.workspace_editor_scroll)
+
+        self.workspace_splitter.addWidget(left)
+        self.workspace_splitter.addWidget(center)
+        self.workspace_splitter.addWidget(right)
+        self.workspace_splitter.setStretchFactor(0, 0)
+        self.workspace_splitter.setStretchFactor(1, 1)
+        self.workspace_splitter.setStretchFactor(2, 1)
+        self.workspace_splitter.setSizes(self._workspace_splitter_sizes())
+        self.workspace_splitter.splitterMoved.connect(lambda *_: self._save_workspace_splitter_sizes())
+        outer.addWidget(self.workspace_splitter, 1)
+        self.page_stack.addWidget(self.workspace_page)
+
+    def _workspace_splitter_sizes(self) -> list[int]:
+        try:
+            values = json.loads(self.db.get_setting("workspace_splitter_sizes", ""))
+            if isinstance(values, list) and len(values) == 3 and all(int(value) > 80 for value in values):
+                return [int(value) for value in values]
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+        return [230, 510, 370]
+
+    def _save_workspace_splitter_sizes(self) -> None:
+        self.db.set_setting("workspace_splitter_sizes", json.dumps(self.workspace_splitter.sizes()))
 
     def on_tab_changed(self, index: int) -> None:
         is_unfinished = index == 1
@@ -455,6 +651,161 @@ class MainWindow(QMainWindow):
             item = self.list_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+
+    @staticmethod
+    def _clear_layout(layout) -> None:
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+    def _set_workspace_previous_scope(self, enabled: bool) -> None:
+        self._workspace_scope = "previous" if enabled else "today"
+        self._render_workspace()
+
+    def _workspace_should_be_active(self) -> bool:
+        """Use a little hysteresis so resizing around the boundary never flickers."""
+        if self.isFullScreen():
+            return True
+        if self._workspace_manual_opt_out:
+            return False
+        if self._workspace_active:
+            return self.width() >= 1080 and self.height() >= 650
+        return self.width() >= 1180 and self.height() >= 700
+
+    def _update_workspace_mode(self) -> None:
+        if not hasattr(self, "page_stack"):
+            return
+        wanted = self._workspace_should_be_active()
+        if wanted == self._workspace_active:
+            return
+        if not wanted and self.workspace_editor.is_dirty():
+            answer = QMessageBox.question(
+                self,
+                "未保存修改",
+                "右侧还有未保存的修改。退出全屏编辑将放弃这些修改，是否继续？",
+                QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Discard:
+                # Keep the wide mode until the user deliberately saves or restores.
+                if not self.isFullScreen():
+                    QTimer.singleShot(0, self.showFullScreen)
+                return
+            self.workspace_editor.restore_baseline()
+        self._workspace_active = wanted
+        self.page_stack.setCurrentWidget(self.workspace_page if wanted else self.standard_page)
+        if wanted:
+            self.workspace_exit_button.setText("退出全屏编辑" if self.isFullScreen() else "收起编辑工作区")
+            self._render_workspace()
+        else:
+            self.render()
+
+    def resizeEvent(self, event):  # noqa: N802
+        super().resizeEvent(event)
+        if hasattr(self, "page_stack"):
+            if self.width() < 1080 or self.height() < 650:
+                self._workspace_manual_opt_out = False
+            QTimer.singleShot(0, self._update_workspace_mode)
+
+    def changeEvent(self, event):  # noqa: N802
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "page_stack"):
+            QTimer.singleShot(0, self._update_workspace_mode)
+
+    def _workspace_tasks(self):
+        today = self.db.today()
+        pending = self.db.all_pending_tasks()
+        previous = [task for task in pending if task["task_date"] < today]
+        self.workspace_previous_button.blockSignals(True)
+        self.workspace_previous_button.setText(f"之前未完成（{len(previous)}）")
+        self.workspace_previous_button.setChecked(self._workspace_scope == "previous")
+        self.workspace_previous_button.blockSignals(False)
+        query = self.workspace_search.text().strip().casefold()
+        if query:
+            tasks = [
+                task for task in self.db.all_tasks()
+                if query in task["title"].casefold() or query in normalize_note_text(task["notes"]).casefold()
+            ]
+            label = f"搜索结果（{len(tasks)}）"
+        elif self._workspace_scope == "previous":
+            tasks = previous
+            label = f"之前未完成（{len(tasks)}）"
+        else:
+            tasks = self.db.tasks_for(today)
+            label = "当日事项"
+        return tasks, label
+
+    def _render_workspace(self, *_unused) -> None:
+        if not hasattr(self, "workspace_list_layout"):
+            return
+        now = datetime.now()
+        self._refresh_header(now)
+        tasks, label = self._workspace_tasks()
+        self.workspace_list_title.setText(label)
+        self._clear_layout(self.workspace_list_layout)
+        if not tasks:
+            message = "没有找到匹配事项。" if self.workspace_search.text().strip() else (
+                "之前没有未完成的事项。" if self._workspace_scope == "previous" else "今天还没有事项。"
+            )
+            empty = QLabel(message)
+            empty.setStyleSheet("color:#87909c; padding:30px 6px;")
+            self.workspace_list_layout.addWidget(empty)
+        else:
+            current_day = None
+            should_group_dates = bool(self.workspace_search.text().strip() or self._workspace_scope == "previous")
+            for task in tasks:
+                if should_group_dates and task["task_date"] != current_day:
+                    current_day = task["task_date"]
+                    self.workspace_list_layout.addWidget(self.section_label(current_day, 5))
+                card = TaskCard(
+                    task,
+                    self.set_completed,
+                    self.edit_task,
+                    self.open_float_menu,
+                    self.delete_task,
+                    on_select=self.select_workspace_task,
+                    selected=task["id"] == self.workspace_selected_task_id,
+                )
+                self.workspace_list_layout.addWidget(card)
+        self.workspace_list_layout.addStretch(1)
+        self.refresh_float()
+
+    def select_workspace_task(self, task) -> None:
+        task_id = int(task["id"])
+        if task_id == self.workspace_selected_task_id:
+            return
+        if self.workspace_editor.is_dirty():
+            answer = QMessageBox.question(
+                self,
+                "未保存修改",
+                "当前事项的修改尚未保存。是否放弃这些修改并切换事项？",
+                QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Discard:
+                return
+        current = self.db.task_by_id(task_id)
+        if current is None:
+            return
+        self.workspace_selected_task_id = task_id
+        self.workspace_editor.load_task(current)
+        self._render_workspace()
+
+    def save_workspace_task(self, task_id: int, values: dict) -> None:
+        current = self.db.task_by_id(task_id)
+        if current is None:
+            self.workspace_selected_task_id = None
+            self.workspace_editor.clear()
+            self._render_workspace()
+            return
+        self.db.update_task(task_id, **values)
+        self._skip_historical_alerts_if_needed(task_id, values)
+        self._sync_windows_reminders()
+        updated = self.db.task_by_id(task_id)
+        self.workspace_editor.mark_saved(updated)
+        self._render_workspace()
+        self.show_notice("事项已保存")
 
     @staticmethod
     def section_label(text: str, top_padding: int = 12) -> QLabel:
@@ -551,6 +902,9 @@ class MainWindow(QMainWindow):
         self.precise_overtime.setText(self._format_precise_overtime(minutes) if minutes >= 30 else "")
 
     def render(self) -> None:
+        if self._workspace_active:
+            self._render_workspace()
+            return
         self.clear_list()
         now = datetime.now()
         self._refresh_header(now)
@@ -665,6 +1019,7 @@ class MainWindow(QMainWindow):
             values = dialog.values()
             task_id = self.db.add_task(**values)
             self._skip_historical_alerts_if_needed(task_id, values)
+            self._sync_windows_reminders()
             self.render()
 
     def edit_task(self, task) -> None:
@@ -677,16 +1032,35 @@ class MainWindow(QMainWindow):
                 self.db.update_task(task["id"], **values)
                 task_id = task["id"]
             self._skip_historical_alerts_if_needed(task_id, values)
+            self._sync_windows_reminders()
+            if (
+                self._workspace_active
+                and task_id == self.workspace_selected_task_id
+                and not self.workspace_editor.is_dirty()
+            ):
+                self.workspace_editor.mark_saved(self.db.task_by_id(task_id))
             self.render()
 
     def set_completed(self, task_id: int, completed: bool) -> None:
         self.db.set_completed(task_id, completed)
+        self._sync_windows_reminders()
         self.render()
 
     def delete_task(self, task) -> None:
         if QMessageBox.question(self, "删除事项", "确定删除这条事项吗？") == QMessageBox.StandardButton.Yes:
             self.db.delete_task(task["id"])
+            if self.workspace_selected_task_id == task["id"]:
+                self.workspace_selected_task_id = None
+                self.workspace_editor.clear()
+            self._sync_windows_reminders()
             self.render()
+
+    def _sync_windows_reminders(self) -> None:
+        """Keep Windows' scheduled reminders aligned with local important tasks."""
+        count = self.windows_reminders.sync(self.db.future_windows_reminder_tasks(datetime.now()))
+        if self.windows_reminders.error and sys.platform == "win32":
+            logging.warning("Windows reminder schedule is unavailable: %s", self.windows_reminders.error)
+        logging.info("Scheduled %s opt-in Windows reminder(s)", count)
 
     def open_float_menu(self, task) -> None:
         menu = QMenu(self)
@@ -787,6 +1161,8 @@ class MainWindow(QMainWindow):
             source = "task" if task else ("fixed_text" if text else "empty")
             manual.append((str(slot), text, source))
         self.float_window.set_items(countdown, manual, self.alert_task_ids)
+        if hasattr(self, "workspace_float_preview"):
+            self.workspace_float_preview.update_from_float(self.float_window)
 
     def float_is_enabled(self) -> bool:
         return self.db.get_setting("float_enabled", "1") == "1"
@@ -828,10 +1204,37 @@ class MainWindow(QMainWindow):
         self.show()
         self.raise_()
         self.activateWindow()
+        self._update_workspace_mode()
         self.render()
 
     def toggle_fullscreen(self) -> None:
-        self.showNormal() if self.isFullScreen() else self.showFullScreen()
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self._workspace_manual_opt_out = False
+            self.showFullScreen()
+        QTimer.singleShot(0, self._update_workspace_mode)
+
+    def exit_workspace(self) -> None:
+        """Leave the workspace cleanly whether it came from full screen or width."""
+        if self.isFullScreen():
+            self.toggle_fullscreen()
+            return
+        if self.workspace_editor.is_dirty():
+            answer = QMessageBox.question(
+                self,
+                "未保存修改",
+                "右侧还有未保存的修改。收起编辑工作区将放弃这些修改，是否继续？",
+                QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Discard:
+                return
+            self.workspace_editor.restore_baseline()
+        self._workspace_manual_opt_out = True
+        self._workspace_active = False
+        self.page_stack.setCurrentWidget(self.standard_page)
+        self.render()
 
     def show_notice(self, text: str) -> None:
         self.notice.setText(text)

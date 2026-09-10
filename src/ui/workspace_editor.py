@@ -1,0 +1,209 @@
+"""Right-hand, save-first editor used by the full-screen workspace."""
+
+from __future__ import annotations
+
+from PyQt6.QtCore import QDate, QTime, Qt, pyqtSignal
+from PyQt6.QtGui import QKeySequence, QShortcut
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ui.controls import CompactDatePicker, NoWheelComboBox, TIME_HOURS, TIME_MINUTES, normalize_note_text
+from ui.task_dialog import PlainNotesEditor, TitleEditor
+
+
+class WorkspaceEditor(QWidget):
+    """An editor that never writes until its explicit Save button is used."""
+
+    save_requested = pyqtSignal(int, dict)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._task_id: int | None = None
+        self._baseline: dict | None = None
+        self._loading = False
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(16, 16, 16, 16)
+        outer.setSpacing(10)
+        self.heading = QLabel("选择一条事项")
+        self.heading.setStyleSheet("font-size:18px; font-weight:600; color:#2c3a4d;")
+        outer.addWidget(self.heading)
+        self.hint = QLabel("从中间列表选择后可直接修改；只有点击保存才会生效。")
+        self.hint.setWordWrap(True)
+        self.hint.setStyleSheet("font-size:12px; color:#7b8795;")
+        outer.addWidget(self.hint)
+
+        self.form_host = QWidget()
+        form = QFormLayout(self.form_host)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        form.setVerticalSpacing(10)
+
+        self.title_edit = TitleEditor()
+        self.title_edit.setFixedHeight(76)
+        self.title_edit.setPlaceholderText("事项标题（最多两行）")
+        self.title_edit.next_field_requested.connect(lambda: self.notes_edit.setFocus())
+        self.title_hint = QLabel("标题最多两行；Enter 转到说明；Shift + Enter 可换行。")
+        self.title_hint.setStyleSheet("font-size:11px; color:#9299a5;")
+        title_box = QVBoxLayout()
+        title_box.setContentsMargins(0, 0, 0, 0)
+        title_box.setSpacing(4)
+        title_box.addWidget(self.title_edit)
+        title_box.addWidget(self.title_hint)
+
+        self.notes_edit = PlainNotesEditor()
+        self.notes_edit.setPlaceholderText("可补充说明、材料或下一步")
+        self.notes_edit.setMinimumHeight(150)
+        self.notes_edit.setAcceptRichText(False)
+
+        self.date_edit = CompactDatePicker(QDate.currentDate())
+        self.time_enabled = QCheckBox("有具体时间")
+        self.hour_combo = NoWheelComboBox()
+        self.minute_combo = NoWheelComboBox()
+        for hour in TIME_HOURS:
+            self.hour_combo.addItem(f"{hour:02d} 时", hour)
+        for minute in TIME_MINUTES:
+            self.minute_combo.addItem(f"{minute:02d} 分", minute)
+        next_hour = min(22, max(7, QTime.currentTime().hour() + 1))
+        self.hour_combo.setCurrentIndex(max(0, self.hour_combo.findData(next_hour)))
+        self.hour_combo.activated.connect(lambda _: self.time_enabled.setChecked(True))
+        self.minute_combo.activated.connect(lambda _: self.time_enabled.setChecked(True))
+        time_row = QHBoxLayout()
+        time_row.setContentsMargins(0, 0, 0, 0)
+        time_row.setSpacing(7)
+        time_row.addWidget(self.time_enabled)
+        time_row.addWidget(self.hour_combo)
+        time_row.addWidget(self.minute_combo)
+        time_row.addStretch()
+
+        self.windows_reminder_check = QCheckBox("重要事项：准点发送 Windows 系统提醒（需手动关闭）")
+        self.windows_reminder_check.setObjectName("windowsReminderCheck")
+        self.windows_reminder_check.setToolTip("默认关闭。勾选后，到准点会显示 Windows 右下角提醒，并保留在通知中心。")
+        self.windows_reminder_check.setStyleSheet(
+            "QCheckBox#windowsReminderCheck { color:#2458bf; font-weight:600; padding:5px 7px; "
+            "border:1px solid #b9ccff; border-radius:8px; background:#eef4ff; }"
+        )
+        self.time_enabled.toggled.connect(self.windows_reminder_check.setVisible)
+        self.fixed_check = QCheckBox("固定钉住待办（显示在当天列表最底部）")
+
+        form.addRow("事项", title_box)
+        form.addRow("说明", self.notes_edit)
+        form.addRow("日期", self.date_edit)
+        form.addRow("时间", time_row)
+        form.addRow("", self.windows_reminder_check)
+        form.addRow("", self.fixed_check)
+        outer.addWidget(self.form_host, 1)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        self.restore_button = QPushButton("还原未保存修改")
+        self.save_button = QPushButton("保存修改")
+        self.save_button.setObjectName("primaryButton")
+        self.restore_button.clicked.connect(self.restore_baseline)
+        self.save_button.clicked.connect(self._emit_save)
+        buttons.addWidget(self.restore_button)
+        buttons.addWidget(self.save_button)
+        outer.addLayout(buttons)
+        QShortcut(QKeySequence("Ctrl+S"), self, activated=self._emit_save)
+        self.clear()
+
+    def clear(self) -> None:
+        self._loading = True
+        self._task_id = None
+        self._baseline = None
+        self.heading.setText("选择一条事项")
+        self.hint.setText("从中间列表选择后可直接修改；只有点击保存才会生效。")
+        self.title_edit.clear()
+        self.notes_edit.clear()
+        self.time_enabled.setChecked(False)
+        self.windows_reminder_check.setChecked(False)
+        self.windows_reminder_check.setVisible(False)
+        self.fixed_check.setChecked(False)
+        self._loading = False
+        self.form_host.setEnabled(False)
+        self.restore_button.setEnabled(False)
+        self.save_button.setEnabled(False)
+
+    def load_task(self, task) -> None:
+        if task is None:
+            self.clear()
+            return
+        self._loading = True
+        self._task_id = int(task["id"])
+        self.heading.setText("编辑事项")
+        self.hint.setText("可以安心复制或调整内容；点击保存后才会写入这条事项。")
+        self.title_edit.setPlainText(task["title"])
+        self.notes_edit.setPlainText(normalize_note_text(task["notes"]))
+        self.date_edit.setDate(QDate.fromString(task["task_date"], "yyyy-MM-dd"))
+        due = task["due_time"]
+        self.time_enabled.setChecked(bool(due))
+        if due:
+            hour, minute = due.split(":", 1)
+            self.hour_combo.setCurrentIndex(max(0, self.hour_combo.findData(int(hour))))
+            index = self.minute_combo.findData(int(minute))
+            if index < 0:
+                self.minute_combo.addItem(f"{int(minute):02d} 分（原时间）", int(minute))
+                index = self.minute_combo.count() - 1
+            self.minute_combo.setCurrentIndex(index)
+        supports_reminder = "windows_reminder_enabled" in task.keys()
+        self.windows_reminder_check.setChecked(bool(supports_reminder and task["windows_reminder_enabled"]))
+        self.windows_reminder_check.setVisible(bool(due))
+        self.fixed_check.setChecked(bool(task["is_fixed"]))
+        self._loading = False
+        self.form_host.setEnabled(True)
+        self.restore_button.setEnabled(True)
+        self.save_button.setEnabled(True)
+        self._baseline = self.values()
+
+    def values(self) -> dict:
+        due_time = None
+        if self.time_enabled.isChecked():
+            due_time = f"{self.hour_combo.currentData():02d}:{self.minute_combo.currentData():02d}"
+        return {
+            "title": self.title_edit.toPlainText().strip(),
+            "notes": normalize_note_text(self.notes_edit.toPlainText()).strip(),
+            "task_date": self.date_edit.date().toString("yyyy-MM-dd"),
+            "due_time": due_time,
+            "is_fixed": self.fixed_check.isChecked(),
+            "windows_reminder_enabled": bool(due_time) and self.windows_reminder_check.isChecked(),
+        }
+
+    def is_dirty(self) -> bool:
+        return self._task_id is not None and self._baseline != self.values()
+
+    def restore_baseline(self) -> None:
+        if self._task_id is None or self._baseline is None:
+            return
+        values = self._baseline
+        self._loading = True
+        self.title_edit.setPlainText(values["title"])
+        self.notes_edit.setPlainText(values["notes"])
+        self.date_edit.setDate(QDate.fromString(values["task_date"], "yyyy-MM-dd"))
+        self.time_enabled.setChecked(bool(values["due_time"]))
+        if values["due_time"]:
+            hour, minute = values["due_time"].split(":", 1)
+            self.hour_combo.setCurrentIndex(max(0, self.hour_combo.findData(int(hour))))
+            self.minute_combo.setCurrentIndex(max(0, self.minute_combo.findData(int(minute))))
+        self.windows_reminder_check.setChecked(values["windows_reminder_enabled"])
+        self.windows_reminder_check.setVisible(bool(values["due_time"]))
+        self.fixed_check.setChecked(values["is_fixed"])
+        self._loading = False
+
+    def _emit_save(self) -> None:
+        if self._task_id is None:
+            return
+        values = self.values()
+        if not values["title"]:
+            self.title_edit.setFocus()
+            return
+        self.save_requested.emit(self._task_id, values)
+
+    def mark_saved(self, task) -> None:
+        """Reload the authoritative saved row as the next clean baseline."""
+        self.load_task(task)

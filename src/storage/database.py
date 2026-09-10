@@ -9,7 +9,7 @@ from typing import Any, Iterable
 
 
 class Database:
-    SCHEMA_VERSION = 3
+    SCHEMA_VERSION = 4
 
     def __init__(self, path: Path) -> None:
         self.connection = sqlite3.connect(path)
@@ -80,6 +80,15 @@ class Database:
                         (new_key, old_row["value"]),
                     )
             version = 3
+        if version < 4:
+            columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(tasks)")}
+            if "windows_reminder_enabled" not in columns:
+                # System notifications are deliberately opt-in. Existing items
+                # keep their current float-only reminder behaviour after upgrade.
+                self.connection.execute(
+                    "ALTER TABLE tasks ADD COLUMN windows_reminder_enabled INTEGER NOT NULL DEFAULT 0"
+                )
+            version = 4
         self.connection.execute(
             "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)",
             (str(version),),
@@ -111,24 +120,33 @@ class Database:
         task_date: str,
         due_time: str | None,
         is_fixed: bool,
+        windows_reminder_enabled: bool = False,
     ) -> int:
         now = datetime.now().isoformat(timespec="seconds")
         cursor = self.connection.execute(
-            """INSERT INTO tasks(title, notes, task_date, due_time, is_fixed, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (title, notes, task_date, due_time, int(is_fixed), now, now),
+            """INSERT INTO tasks(
+                   title, notes, task_date, due_time, is_fixed, windows_reminder_enabled, created_at, updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (title, notes, task_date, due_time, int(is_fixed), int(windows_reminder_enabled), now, now),
         )
         self.connection.commit()
         return int(cursor.lastrowid)
 
     def update_task(self, task_id: int, **fields: Any) -> None:
-        allowed = {"title", "notes", "task_date", "due_time", "is_fixed", "float_slot"}
+        allowed = {
+            "title", "notes", "task_date", "due_time", "is_fixed", "float_slot", "windows_reminder_enabled"
+        }
         values = {key: value for key, value in fields.items() if key in allowed}
         if not values:
             return
-        # A rescheduled task is a new reminder schedule. Without clearing these
-        # markers, a task moved to another time would never alert again.
-        if "task_date" in values or "due_time" in values:
+        # A rescheduled task is a new reminder schedule. Do not clear alert
+        # markers merely because an editor submits an unchanged date/time.
+        current = self.task_by_id(task_id)
+        time_changed = current is not None and (
+            ("task_date" in values and values["task_date"] != current["task_date"])
+            or ("due_time" in values and values["due_time"] != current["due_time"])
+        )
+        if time_changed:
             values["pre_alerted_at"] = None
             values["due_alerted_at"] = None
         values["updated_at"] = datetime.now().isoformat(timespec="seconds")
@@ -222,6 +240,19 @@ class Database:
                AND is_completed = 0 AND deleted_at IS NULL""",
             (today,),
         ).fetchall()
+
+    def future_windows_reminder_tasks(self, now: datetime) -> list[sqlite3.Row]:
+        """Return only future, unfinished, explicitly opted-in system reminders."""
+        return list(
+            self.connection.execute(
+                """SELECT * FROM tasks
+                   WHERE windows_reminder_enabled = 1
+                     AND due_time IS NOT NULL
+                     AND is_completed = 0
+                     AND deleted_at IS NULL
+                   ORDER BY task_date ASC, due_time ASC, created_at ASC"""
+            ).fetchall()
+        )
 
     def mark_alerted(self, task_id: int, kind: str) -> None:
         column = "pre_alerted_at" if kind == "pre" else "due_alerted_at"

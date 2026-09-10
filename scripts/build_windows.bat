@@ -20,16 +20,17 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-pyinstaller --noconfirm --clean --windowed --onefile --paths src ^
+pyinstaller --noconfirm --clean --windowed --onefile --paths src --collect-all windows_toasts --collect-all winrt ^
   --hidden-import app_paths ^
   --hidden-import services.hotkey ^
+  --hidden-import services.windows_notifications ^
   --hidden-import storage.database ^
   --hidden-import ui.main_window ^
   --hidden-import ui.task_dialog ^
   --hidden-import ui.float_window ^
   --hidden-import ui.settings_dialog ^
   --hidden-import ui.theme ^
-  --hidden-import ui.controls ^
+  --hidden-import ui.controls --hidden-import ui.workspace_editor ^
   --name DaKeDesk src\main.py
 if errorlevel 1 (
   echo Program build failed. Please keep this window open and send the error text or screenshot.
