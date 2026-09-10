@@ -28,7 +28,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.1"
+APP_VERSION = "4.2"
 
 
 def app_icon() -> QIcon:
@@ -70,16 +70,27 @@ class FadedPreviewLine(QFrame):
 
 
 class ExpandableNotesWidget(QWidget):
-    """Show three clear lines and a gentle preview of the fourth when hidden."""
+    """Show a compact text preview, optionally expandable in the normal page."""
 
     MAX_VISIBLE_LINES = 3
 
-    def __init__(self, notes: str, parent=None) -> None:
+    def __init__(
+        self,
+        notes: str,
+        parent=None,
+        *,
+        max_visible_lines: int = MAX_VISIBLE_LINES,
+        expandable: bool = True,
+        collapsed_hint: str = "↓ 点击展开完整说明",
+    ) -> None:
         super().__init__(parent)
         self._notes = normalize_note_text(notes)
         self._lines = self._notes.splitlines()
+        self._max_visible_lines = max_visible_lines
         self._collapsed = True
-        self._expandable = len(self._lines) > self.MAX_VISIBLE_LINES
+        self._expandable = expandable and len(self._lines) > self._max_visible_lines
+        self._has_hidden_lines = len(self._lines) > self._max_visible_lines
+        self._collapsed_hint = collapsed_hint
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(1)
@@ -87,7 +98,7 @@ class ExpandableNotesWidget(QWidget):
         self.summary.setTextFormat(Qt.TextFormat.PlainText)
         self.summary.setWordWrap(True)
         self.summary.setStyleSheet("font-size:12px; color:#718096;")
-        self.peek = FadedPreviewLine(self._lines[self.MAX_VISIBLE_LINES] if self._expandable else "")
+        self.peek = FadedPreviewLine(self._lines[self._max_visible_lines] if self._has_hidden_lines else "")
         self.hint = QLabel()
         self.hint.setTextFormat(Qt.TextFormat.PlainText)
         self.hint.setStyleSheet("font-size:11px; color:#9ba6b5; font-weight:500; padding-left:78px;")
@@ -99,18 +110,18 @@ class ExpandableNotesWidget(QWidget):
         self._update_text()
 
     def _update_text(self) -> None:
-        if not self._expandable or not self._collapsed:
+        if not self._has_hidden_lines or not self._collapsed:
             self.summary.setText(self._notes)
             self.peek.setVisible(False)
             self.hint.setVisible(self._expandable)
             self.hint.setText("↑ 点击收起说明" if self._expandable else "")
             self.setToolTip("点击收起说明" if self._expandable else "")
             return
-        self.summary.setText("\n".join(self._lines[:self.MAX_VISIBLE_LINES]))
+        self.summary.setText("\n".join(self._lines[:self._max_visible_lines]))
         self.peek.setVisible(True)
-        self.hint.setText("↓ 点击展开完整说明")
+        self.hint.setText(self._collapsed_hint)
         self.hint.setVisible(True)
-        self.setToolTip("点击展开完整说明")
+        self.setToolTip("点击展开完整说明" if self._expandable else "完整内容可在右侧查看")
 
     def mousePressEvent(self, event):  # noqa: N802
         if self._expandable and event.button() == Qt.MouseButton.LeftButton:
@@ -125,6 +136,7 @@ class TaskCard(QFrame):
     def __init__(
         self, task, on_complete, on_edit, on_float, on_delete, parent=None,
         preview: bool = False, on_select=None, selected: bool = False,
+        workspace_mode: bool = False,
     ) -> None:
         super().__init__(parent)
         self._on_select = on_select
@@ -159,7 +171,16 @@ class TaskCard(QFrame):
         )
         content.addWidget(title)
         if task["notes"]:
-            notes = ExpandableNotesWidget(task["notes"])
+            notes = ExpandableNotesWidget(
+                task["notes"],
+                max_visible_lines=8 if workspace_mode else ExpandableNotesWidget.MAX_VISIBLE_LINES,
+                expandable=not workspace_mode,
+                collapsed_hint="更多内容请在右侧查看",
+            )
+            if workspace_mode:
+                # A workspace card is selected as one whole target.  Its preview
+                # must not consume the click that opens the right-side editor.
+                notes.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             content.addWidget(notes)
         if overdue:
             warning = QLabel("已超时")
@@ -167,7 +188,9 @@ class TaskCard(QFrame):
             warning.setStyleSheet("font-size:12px; color:#bd5b5b; margin-top:2px;")
             content.addWidget(warning)
         layout.addLayout(content, 1)
-        for text, callback in (("编辑", lambda: on_edit(task)), ("重点位", lambda: on_float(task)), ("删除", lambda: on_delete(task))):
+        actions = [] if workspace_mode else [("编辑", lambda: on_edit(task))]
+        actions.extend([("浮窗重点位", lambda: on_float(task)), ("删除", lambda: on_delete(task))])
+        for text, callback in actions:
             button = QPushButton(text)
             button.setObjectName("quietButton")
             button.clicked.connect(callback)
@@ -229,10 +252,14 @@ class WorkspaceFloatPreview(QFrame):
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(5, 3, 6, 3)
             row_layout.setSpacing(5)
-            badge = QLabel(card._badge_text)
-            badge.setFixedWidth(22)
+            badge_text = card._badge_text
+            if ":" in badge_text:
+                hour, minute = badge_text.split(":", 1)
+                badge_text = f"{hour}\n{minute}"
+            badge = QLabel(badge_text)
+            badge.setFixedSize(30, 32)
             badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            badge.setStyleSheet("font-size:11px; font-weight:600; color:#687789;")
+            badge.setStyleSheet("font-size:11px; line-height:12px; font-weight:600; color:#687789;")
             text = QLabel(card.text.text())
             text.setWordWrap(True)
             text.setStyleSheet("font-size:11px; color:#586575;")
@@ -268,6 +295,7 @@ class MainWindow(QMainWindow):
         self._ensure_v35_float_hint()
         self._ensure_v37_float_hint_copy()
         self._ensure_v41_workspace_layout()
+        self._ensure_v42_workspace_layout()
         self.setWindowTitle(f"{APP_NAME} V{APP_VERSION}")
         self.setWindowIcon(app_icon())
         self.resize(760, 760)
@@ -412,6 +440,15 @@ class MainWindow(QMainWindow):
             self.db.set_setting("workspace_splitter_sizes", json.dumps(new_default))
         self.db.set_setting("workspace_layout_v410_seeded", "1")
 
+    def _ensure_v42_workspace_layout(self) -> None:
+        """Apply the agreed first-open three-column ratio once for every user."""
+        if self.db.get_setting("workspace_layout_v420_seeded", "0") == "1":
+            return
+        # Deliberately replace prior V4 workspace widths once.  After this first
+        # V4.2 opening, users' own splitter adjustments are saved as usual.
+        self.db.set_setting("workspace_splitter_sizes", json.dumps([150, 500, 350]))
+        self.db.set_setting("workspace_layout_v420_seeded", "1")
+
     def _build_ui(self) -> None:
         self._workspace_active = False
         self._workspace_manual_opt_out = False
@@ -533,6 +570,8 @@ class MainWindow(QMainWindow):
             QFrame#workspaceFloatPreview { background:#f4f7fb; border:1px solid #dbe4f0; border-radius:12px; }
             QPushButton#workspaceScopeButton { text-align:left; min-height:30px; padding:5px 9px; color:#566476; }
             QPushButton#workspaceScopeButton:checked { background:#eaf0ff; border:1px solid #90aaee; color:#315bb7; font-weight:600; }
+            QSplitter::handle:horizontal { background:transparent; margin:2px 0; }
+            QSplitter::handle:horizontal:hover { background:#c9d8fb; border-radius:5px; }
         """)
         self._build_workspace_ui()
 
@@ -561,15 +600,18 @@ class MainWindow(QMainWindow):
         add = QPushButton("+ 添加事项")
         add.setObjectName("primaryButton")
         add.clicked.connect(self.add_task)
+        workspace_settings = QPushButton("设置")
+        workspace_settings.clicked.connect(self.open_settings)
         self.workspace_exit_button = QPushButton("退出全屏编辑")
         self.workspace_exit_button.clicked.connect(self.exit_workspace)
         header_layout.addWidget(add)
+        header_layout.addWidget(workspace_settings)
         header_layout.addWidget(self.workspace_exit_button)
         outer.addWidget(header)
 
         self.workspace_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.workspace_splitter.setChildrenCollapsible(False)
-        self.workspace_splitter.setHandleWidth(7)
+        self.workspace_splitter.setHandleWidth(14)
 
         left = QFrame()
         left.setObjectName("chromePanel")
@@ -665,6 +707,10 @@ class MainWindow(QMainWindow):
         self.workspace_splitter.setStretchFactor(2, 1)
         self.workspace_splitter.setSizes(self._workspace_splitter_sizes())
         self.workspace_splitter.splitterMoved.connect(lambda *_: self._save_workspace_splitter_sizes())
+        for index in range(1, self.workspace_splitter.count()):
+            handle = self.workspace_splitter.handle(index)
+            handle.setCursor(Qt.CursorShape.SplitHCursor)
+            handle.setToolTip("拖动调整栏宽")
         outer.addWidget(self.workspace_splitter, 1)
         self.page_stack.addWidget(self.workspace_page)
 
@@ -675,7 +721,7 @@ class MainWindow(QMainWindow):
                 return [int(value) for value in values]
         except (TypeError, ValueError, json.JSONDecodeError):
             pass
-        return [205, 385, 520]
+        return [150, 500, 350]
 
     def _save_workspace_splitter_sizes(self) -> None:
         self.db.set_setting("workspace_splitter_sizes", json.dumps(self.workspace_splitter.sizes()))
@@ -872,6 +918,7 @@ class MainWindow(QMainWindow):
                     self.delete_task,
                     on_select=self.select_workspace_task,
                     selected=task["id"] == self.workspace_selected_task_id,
+                    workspace_mode=True,
                 )
                 self.workspace_list_layout.addWidget(card)
                 self._workspace_cards[int(task["id"])] = card
@@ -1177,7 +1224,7 @@ class MainWindow(QMainWindow):
         for slot in range(1, manual_count + 1):
             other = occupied.get(slot)
             suffix = f"（替换：{other['title']}）" if other and other["id"] != task["id"] else ""
-            action = QAction(f"钉到桌边重点位 {slot}{suffix}", self)
+            action = QAction(f"钉到浮窗重点位 {slot}{suffix}", self)
             action.triggered.connect(lambda _, number=slot: self.assign_float_task(task["id"], number))
             menu.addAction(action)
         # The task card may have been rendered before another menu action or a
@@ -1186,7 +1233,7 @@ class MainWindow(QMainWindow):
         # item never gains a misleading removal action.
         current_task = self.db.task_by_id(task["id"])
         if current_task and current_task["float_slot"] is not None:
-            remove = QAction("移出桌边重点位（取消钉住）", self)
+            remove = QAction("移出浮窗重点位（取消钉住）", self)
             remove.triggered.connect(lambda: (self.db.update_task(task["id"], float_slot=None), self.refresh_float()))
             menu.addAction(remove)
         menu.exec(self.cursor().pos())

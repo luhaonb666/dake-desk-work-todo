@@ -6,6 +6,7 @@ from PyQt6.QtCore import QDate, QTime, Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -46,8 +47,8 @@ class WorkspaceEditor(QWidget):
 
         self.title_edit = TitleEditor()
         self.title_edit.setFixedHeight(76)
-        self.title_edit.setPlaceholderText("事项标题（最多两行）")
-        self.title_edit.setToolTip("标题最多两行；Enter 转到说明；Shift + Enter 可换行。")
+        self.title_edit.setPlaceholderText("待办名称（最多两行）")
+        self.title_edit.setToolTip("待办名称最多两行；Enter 转到具体内容；Shift + Enter 可换行。")
         self.title_edit.next_field_requested.connect(lambda: self.notes_edit.setFocus())
 
         self.notes_edit = PlainNotesEditor()
@@ -83,7 +84,7 @@ class WorkspaceEditor(QWidget):
             "border:1px solid #b9ccff; border-radius:8px; background:#eef4ff; }"
         )
         self.time_enabled.toggled.connect(self._sync_windows_reminder_availability)
-        self.fixed_check = QCheckBox("固定钉住待办（显示在当天列表最底部）")
+        self.fixed_check = QCheckBox("固定锁住待办（显示在当天列表最底部）")
 
         form.addWidget(self.title_edit)
         form.addWidget(self.notes_edit, 1)
@@ -92,20 +93,28 @@ class WorkspaceEditor(QWidget):
         form.addWidget(settings_label)
         form.addWidget(self.date_edit)
         form.addLayout(time_row)
-        form.addWidget(self.windows_reminder_check)
         form.addWidget(self.fixed_check)
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setStyleSheet("color:#dbe4ee; margin:11px 0 7px;")
+        form.addWidget(divider)
+        # This important, optional reminder is deliberately last: it starts on
+        # the same left axis as the time controls, but is visually separated
+        # from ordinary scheduling choices.
+        form.addWidget(self.windows_reminder_check)
         self._outer_layout.addWidget(self.form_host, 1)
 
         self.action_bar = QWidget()
         buttons = QHBoxLayout(self.action_bar)
         buttons.setContentsMargins(16, 10, 16, 10)
-        buttons.addStretch()
         self.status_label = QLabel()
-        self.status_label.setStyleSheet("font-size:12px; color:#7c8795;")
+        self.status_label.setStyleSheet("font-size:12px; color:#6f7d8d; font-weight:500;")
         buttons.addWidget(self.status_label)
-        self.restore_button = QPushButton("还原未保存修改")
+        buttons.addStretch()
+        self.restore_button = QPushButton("撤销本次修改")
         self.save_button = QPushButton("保存修改")
         self.save_button.setObjectName("primaryButton")
+        self.save_button.setStyleSheet("QPushButton { color:white; font-weight:600; }")
         self.restore_button.clicked.connect(self.restore_baseline)
         self.save_button.clicked.connect(self._emit_save)
         buttons.addWidget(self.restore_button)
