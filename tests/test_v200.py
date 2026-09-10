@@ -1,4 +1,4 @@
-"""Focused V4.2 regression checks for settings, reminders, and task views."""
+"""Focused V4.3 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 

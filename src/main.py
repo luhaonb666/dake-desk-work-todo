@@ -1,4 +1,4 @@
-"""DaKe Desk V4.2 application entry point."""
+"""DaKe Desk V4.3 application entry point."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from app_paths import configure_logging
 from services.hotkey import GlobalHotkey
-from ui.main_window import MainWindow
+from ui.main_window import MainWindow, app_icon
 from ui.theme import configure_application_font
 
 
@@ -35,6 +35,7 @@ def main() -> int:
     install_exception_hook()
     app = QApplication(sys.argv)
     configure_application_font(app)
+    app.setWindowIcon(app_icon())
     app.setQuitOnLastWindowClosed(False)
     window = MainWindow()
     hotkey = GlobalHotkey(window.show_editor)

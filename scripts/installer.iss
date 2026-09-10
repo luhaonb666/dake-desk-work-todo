@@ -1,5 +1,5 @@
 #define AppName "大可桌边"
-#define AppVersion "4.2"
+#define AppVersion "4.3"
 #define AppPublisher "大可"
 #define AppExeName "DaKeDesk.exe"
 #define AppAUMID "DaKe.DaKeDesk"
@@ -9,6 +9,8 @@ AppId={{B0BBAB27-0C46-42CD-98CD-D2F2EF906776}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
+SetupIconFile=..\assets\dake-desk-icon.ico
+UninstallDisplayIcon={app}\{#AppExeName}
 DefaultDirName={code:SuggestedInstallDir}
 UsePreviousAppDir=yes
 DisableDirPage=auto

@@ -7,6 +7,7 @@ import logging
 import random
 import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from PyQt6.QtCore import QDate, QEvent, QTimer, Qt
 from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
@@ -28,10 +29,20 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.2"
+APP_VERSION = "4.3"
 
 
 def app_icon() -> QIcon:
+    """Load the packaged product icon, with a small safe development fallback."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
+    icon_path = base / "assets" / "dake-desk-icon.png"
+    if icon_path.is_file():
+        icon = QIcon(str(icon_path))
+        if not icon.isNull():
+            return icon
+
+    # The fallback keeps source-only runs usable if an asset is accidentally
+    # absent; packaged Windows builds always include the image above.
     pixmap = QPixmap(64, 64)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)

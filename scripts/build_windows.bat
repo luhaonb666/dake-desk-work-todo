@@ -20,7 +20,7 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-pyinstaller --noconfirm --clean --windowed --onefile --paths src --collect-all windows_toasts --collect-all winrt ^
+pyinstaller --noconfirm --clean --windowed --onefile --icon assets\dake-desk-icon.ico --add-data "assets;assets" --paths src --collect-all windows_toasts --collect-all winrt ^
   --hidden-import app_paths ^
   --hidden-import services.hotkey ^
   --hidden-import services.windows_notifications ^
