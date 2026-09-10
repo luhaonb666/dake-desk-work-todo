@@ -23,7 +23,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run V4.1 regression tests
+      - name: Run V4.3 regression tests
         env:
           PYTHONPATH: src
           QT_QPA_PLATFORM: offscreen
@@ -31,7 +31,7 @@ jobs:
 
       - name: Build application
         run: >
-          pyinstaller --noconfirm --clean --windowed --onefile --paths src --collect-all windows_toasts --collect-all winrt
+          pyinstaller --noconfirm --clean --windowed --onefile --icon assets\dake-desk-icon.ico --add-data "assets;assets" --paths src --collect-all windows_toasts --collect-all winrt
           --hidden-import app_paths --hidden-import services.hotkey --hidden-import services.windows_notifications
           --hidden-import storage.database --hidden-import ui.main_window
           --hidden-import ui.task_dialog --hidden-import ui.float_window

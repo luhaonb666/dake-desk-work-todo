@@ -492,9 +492,14 @@ class V200Tests(unittest.TestCase):
 
     def test_windows_system_reminder_is_opt_in_and_requires_a_time(self) -> None:
         dialog = TaskDialog()
-        self.assertTrue(dialog.windows_reminder_check.isHidden())
+        # The choice stays visible as an explicit important-task feature; it is
+        # simply unavailable until a concrete reminder time is chosen.
+        self.assertFalse(dialog.windows_reminder_check.isHidden())
+        self.assertFalse(dialog.windows_reminder_check.isEnabled())
+        self.assertFalse(dialog.windows_reminder_check.isChecked())
         dialog.time_enabled.setChecked(True)
         self.assertFalse(dialog.windows_reminder_check.isHidden())
+        self.assertTrue(dialog.windows_reminder_check.isEnabled())
         self.assertFalse(dialog.windows_reminder_check.isChecked())
         dialog.windows_reminder_check.setChecked(True)
         self.assertTrue(dialog.values()["windows_reminder_enabled"])
