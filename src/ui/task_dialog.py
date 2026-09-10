@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPlainTextEdit,
+    QSizePolicy,
     QTextEdit,
     QVBoxLayout,
 )
@@ -82,11 +83,12 @@ class TaskDialog(QDialog):
         self.setStyleSheet(APP_STYLE + "QDialog#taskDialog { background:#f7f9fc; }")
         layout = QVBoxLayout(self)
         form = QFormLayout()
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         self.title_edit = TitleEditor()
         self.title_edit.setPlainText(task["title"] if task else "")
         self.title_edit.setPlaceholderText("例如：xxxx公司的技术方案")
-        self.title_edit.setFixedHeight(76)
-        self.title_hint = QLabel("待办名称最多2行；Enter 转到具体内容；Shift + Enter 或 Alt + Enter 换行；Ctrl + S 保存。")
+        self.title_edit.setFixedHeight(64)
+        self.title_hint = QLabel("事项标题最多2行；Enter 转到具体内容；Shift + Enter 或 Alt + Enter 换行；Ctrl + S 保存。")
         self.title_hint.setStyleSheet("font-size:11px; color:#9299a5;")
         title_box = QVBoxLayout()
         title_box.addWidget(self.title_edit)
@@ -99,6 +101,7 @@ class TaskDialog(QDialog):
         self.notes_edit.setPlainText(normalize_note_text(task["notes"] if task else ""))
         self.notes_edit.setPlaceholderText("可填写具体内容、材料或下一步")
         self.notes_edit.setFixedHeight(100)
+        self.notes_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.title_edit.next_field_requested.connect(self.notes_edit.setFocus)
 
         self.date_edit = CompactDatePicker()
@@ -117,9 +120,18 @@ class TaskDialog(QDialog):
             "默认关闭。勾选后，到准点会显示 Windows 右下角提醒，并保留在通知中心。"
         )
         self.windows_reminder_check.setStyleSheet(
-            "QCheckBox#windowsReminderCheck { color:#2458bf; font-weight:600; padding:5px 7px 5px 0; "
-            "border:1px solid #b9ccff; border-radius:8px; background:#eef4ff; }"
+            "QCheckBox#windowsReminderCheck { color:#2458bf; font-weight:600; padding:5px 0; "
+            "border:none; background:transparent; }"
         )
+        self.windows_reminder_box = QFrame()
+        self.windows_reminder_box.setObjectName("windowsReminderBox")
+        self.windows_reminder_box.setStyleSheet(
+            "QFrame#windowsReminderBox { border:1px solid #b9ccff; border-radius:8px; background:#eef4ff; }"
+        )
+        reminder_layout = QHBoxLayout(self.windows_reminder_box)
+        reminder_layout.setContentsMargins(0, 0, 7, 0)
+        reminder_layout.setSpacing(0)
+        reminder_layout.addWidget(self.windows_reminder_check)
         self.hour_combo = NoWheelComboBox()
         for hour in TIME_HOURS:
             self.hour_combo.addItem(f"{hour:02d} 时", hour)
@@ -156,7 +168,7 @@ class TaskDialog(QDialog):
         self.duplicate_check = QCheckBox("新增复制该条事件卡")
         self.duplicate_check.setToolTip("保留原事项不变，再新建一条可独立修改的记录")
         self.duplicate_check.setVisible(bool(task))
-        form.addRow("待办名称", title_box)
+        form.addRow("事项标题", title_box)
         form.addRow("具体内容", self.notes_edit)
         form.addRow("日期", self.date_edit)
         form.addRow("时间", time_box)
@@ -169,7 +181,7 @@ class TaskDialog(QDialog):
         form.addRow("", divider)
         # Important system push is a deliberate final choice rather than an
         # ordinary scheduling option, so it remains visually separate.
-        form.addRow("", self.windows_reminder_check)
+        form.addRow("", self.windows_reminder_box)
         layout.addLayout(form)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Save)
         buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存")

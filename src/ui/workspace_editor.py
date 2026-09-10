@@ -47,8 +47,8 @@ class WorkspaceEditor(QWidget):
 
         self.title_edit = TitleEditor()
         self.title_edit.setFixedHeight(76)
-        self.title_edit.setPlaceholderText("待办名称（最多两行）")
-        self.title_edit.setToolTip("待办名称最多两行；Enter 转到具体内容；Shift + Enter 可换行。")
+        self.title_edit.setPlaceholderText("事项标题（最多两行）")
+        self.title_edit.setToolTip("事项标题最多两行；Enter 转到具体内容；Shift + Enter 可换行。")
         self.title_edit.next_field_requested.connect(lambda: self.notes_edit.setFocus())
 
         self.notes_edit = PlainNotesEditor()

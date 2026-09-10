@@ -20,7 +20,7 @@ from app_paths import app_data_dir
 from services.windows_notifications import WindowsReminderService
 from storage.database import Database
 from ui.controls import CompactDatePicker, normalize_note_text
-from ui.float_window import FloatWindow
+from ui.float_window import FloatBadge, FloatWindow
 from ui.settings_dialog import SettingsDialog
 from ui.task_dialog import TaskDialog
 from ui.theme import APP_STYLE, TASK_CARD_COLORS
@@ -247,22 +247,24 @@ class WorkspaceFloatPreview(QFrame):
                 item.widget().deleteLater()
         for card in float_window._cards:
             row = QFrame()
+            row.setObjectName("workspaceFloatPreviewCard")
             background = "#fff7e8" if card._kind == "countdown" else "#f5f7fa"
-            row.setStyleSheet(f"background:{background}; border:1px solid #d9e0e8; border-radius:8px;")
+            border = "#f2d5a7" if card._kind == "countdown" else "#dce3eb"
+            row.setStyleSheet(
+                "QFrame#workspaceFloatPreviewCard "
+                f"{{ background:{background}; border:1px solid {border}; border-radius:13px; }}"
+            )
             row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(5, 3, 6, 3)
-            row_layout.setSpacing(5)
-            badge_text = card._badge_text
-            if ":" in badge_text:
-                hour, minute = badge_text.split(":", 1)
-                badge_text = f"{hour}\n{minute}"
-            badge = QLabel(badge_text)
-            badge.setFixedSize(30, 32)
-            badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            badge.setStyleSheet("font-size:11px; line-height:12px; font-weight:600; color:#687789;")
+            # Reuse the real float's badge rather than imitating it with nested
+            # labels.  The preview therefore keeps one calm card surface,
+            # without separate bubbles behind the time or card copy.
+            row_layout.setContentsMargins(1, 3, 6, 3)
+            row_layout.setSpacing(3)
+            badge = FloatBadge()
+            badge.set_value(card._badge_text, "#9a6d24" if card._kind == "countdown" else "#64707e")
             text = QLabel(card.text.text())
-            text.setWordWrap(True)
-            text.setStyleSheet("font-size:11px; color:#586575;")
+            text.setWordWrap(False)
+            text.setStyleSheet(card.text.styleSheet())
             row_layout.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
             row_layout.addWidget(text, 1)
             self.rows.addWidget(row)
