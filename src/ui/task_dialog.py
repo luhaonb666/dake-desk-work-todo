@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
+    QFrame,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -116,7 +117,7 @@ class TaskDialog(QDialog):
             "默认关闭。勾选后，到准点会显示 Windows 右下角提醒，并保留在通知中心。"
         )
         self.windows_reminder_check.setStyleSheet(
-            "QCheckBox#windowsReminderCheck { color:#2458bf; font-weight:600; padding:5px 7px; "
+            "QCheckBox#windowsReminderCheck { color:#2458bf; font-weight:600; padding:5px 7px 5px 0; "
             "border:1px solid #b9ccff; border-radius:8px; background:#eef4ff; }"
         )
         self.hour_combo = NoWheelComboBox()
@@ -159,10 +160,16 @@ class TaskDialog(QDialog):
         form.addRow("具体内容", self.notes_edit)
         form.addRow("日期", self.date_edit)
         form.addRow("时间", time_box)
-        form.addRow("", self.windows_reminder_check)
         form.addRow("", self.fixed_check)
         if task:
             form.addRow("", self.duplicate_check)
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setStyleSheet("color:#dbe4ee; margin:13px 0 8px;")
+        form.addRow("", divider)
+        # Important system push is a deliberate final choice rather than an
+        # ordinary scheduling option, so it remains visually separate.
+        form.addRow("", self.windows_reminder_check)
         layout.addLayout(form)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Save)
         buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存")

@@ -441,13 +441,14 @@ class MainWindow(QMainWindow):
         self.db.set_setting("workspace_layout_v410_seeded", "1")
 
     def _ensure_v42_workspace_layout(self) -> None:
-        """Apply the agreed first-open three-column ratio once for every user."""
-        if self.db.get_setting("workspace_layout_v420_seeded", "0") == "1":
+        """Give every V4.2 workspace a usable float-preview column once."""
+        if self.db.get_setting("workspace_layout_v420_hotfix_seeded", "0") == "1":
             return
-        # Deliberately replace prior V4 workspace widths once.  After this first
-        # V4.2 opening, users' own splitter adjustments are saved as usual.
-        self.db.set_setting("workspace_splitter_sizes", json.dumps([150, 500, 350]))
-        self.db.set_setting("workspace_layout_v420_seeded", "1")
+        # The former 15% left column technically matched the requested ratio,
+        # but made the live float preview unreadable on ordinary displays.
+        # Reset that V4.2 default once; later user drags are still preserved.
+        self.db.set_setting("workspace_splitter_sizes", json.dumps([220, 430, 350]))
+        self.db.set_setting("workspace_layout_v420_hotfix_seeded", "1")
 
     def _build_ui(self) -> None:
         self._workspace_active = False
@@ -721,7 +722,7 @@ class MainWindow(QMainWindow):
                 return [int(value) for value in values]
         except (TypeError, ValueError, json.JSONDecodeError):
             pass
-        return [150, 500, 350]
+        return [220, 430, 350]
 
     def _save_workspace_splitter_sizes(self) -> None:
         self.db.set_setting("workspace_splitter_sizes", json.dumps(self.workspace_splitter.sizes()))
