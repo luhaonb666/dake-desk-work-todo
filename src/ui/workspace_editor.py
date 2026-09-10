@@ -113,8 +113,6 @@ class WorkspaceEditor(QWidget):
         buttons.addStretch()
         self.restore_button = QPushButton("撤销本次修改")
         self.save_button = QPushButton("保存修改")
-        self.save_button.setObjectName("primaryButton")
-        self.save_button.setStyleSheet("QPushButton { color:white; font-weight:600; }")
         self.restore_button.clicked.connect(self.restore_baseline)
         self.save_button.clicked.connect(self._emit_save)
         buttons.addWidget(self.restore_button)

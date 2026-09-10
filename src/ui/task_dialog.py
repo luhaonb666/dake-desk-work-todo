@@ -110,8 +110,12 @@ class TaskDialog(QDialog):
 
         self.time_enabled = QCheckBox("有具体时间")
         self.time_enabled.setChecked(bool(task and task["due_time"]))
-        self.windows_reminder_check = QCheckBox("重要事项：准点发送 Windows 系统提醒（需手动关闭）")
-        self.windows_reminder_check.setObjectName("windowsReminderCheck")
+        # Keep the visible square in its own fixed-width control.  A normal
+        # text-bearing QCheckBox retains platform-specific inner margins, which
+        # made this indicator appear several pixels right of the other options.
+        self.windows_reminder_check = QCheckBox()
+        self.windows_reminder_check.setObjectName("windowsReminderIndicator")
+        self.windows_reminder_check.setFixedSize(18, 18)
         task_supports_system_reminder = bool(task and "windows_reminder_enabled" in task.keys())
         self.windows_reminder_check.setChecked(
             bool(task and task_supports_system_reminder and task["windows_reminder_enabled"])
@@ -120,18 +124,23 @@ class TaskDialog(QDialog):
             "默认关闭。勾选后，到准点会显示 Windows 右下角提醒，并保留在通知中心。"
         )
         self.windows_reminder_check.setStyleSheet(
-            "QCheckBox#windowsReminderCheck { color:#2458bf; font-weight:600; padding:5px 0; "
-            "border:none; background:transparent; }"
+            "QCheckBox#windowsReminderIndicator { padding:0; margin:0; border:none; background:transparent; }"
+            "QCheckBox#windowsReminderIndicator::indicator { width:17px; height:17px; margin:0; }"
         )
+        self.windows_reminder_label = QLabel("重要事项：准点发送 Windows 系统提醒（需手动关闭）")
+        self.windows_reminder_label.setStyleSheet("color:#0659c9; font-weight:600; background:transparent;")
+        self.windows_reminder_label.setToolTip(self.windows_reminder_check.toolTip())
         self.windows_reminder_box = QFrame()
         self.windows_reminder_box.setObjectName("windowsReminderBox")
         self.windows_reminder_box.setStyleSheet(
             "QFrame#windowsReminderBox { border:1px solid #b9ccff; border-radius:8px; background:#eef4ff; }"
         )
         reminder_layout = QHBoxLayout(self.windows_reminder_box)
-        reminder_layout.setContentsMargins(0, 0, 7, 0)
-        reminder_layout.setSpacing(0)
+        reminder_layout.setContentsMargins(0, 5, 7, 5)
+        reminder_layout.setSpacing(8)
         reminder_layout.addWidget(self.windows_reminder_check)
+        reminder_layout.addWidget(self.windows_reminder_label)
+        reminder_layout.addStretch()
         self.hour_combo = NoWheelComboBox()
         for hour in TIME_HOURS:
             self.hour_combo.addItem(f"{hour:02d} 时", hour)
@@ -208,6 +217,7 @@ class TaskDialog(QDialog):
     def _sync_windows_reminder_availability(self, enabled: bool) -> None:
         """Keep the important-reminder choice visible and explain its prerequisite."""
         self.windows_reminder_check.setEnabled(enabled)
+        self.windows_reminder_label.setEnabled(enabled)
         if not enabled:
             self.windows_reminder_check.setChecked(False)
 
