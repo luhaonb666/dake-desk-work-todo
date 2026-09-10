@@ -204,6 +204,16 @@ class Database:
             ).fetchall()
         )
 
+    def fixed_tasks(self) -> list[sqlite3.Row]:
+        """Return every item the user marked as a fixed to-do, across dates."""
+        return list(
+            self.connection.execute(
+                """SELECT * FROM tasks
+                   WHERE is_fixed = 1 AND deleted_at IS NULL
+                   ORDER BY task_date ASC, due_time IS NULL ASC, due_time ASC, created_at ASC"""
+            ).fetchall()
+        )
+
     def float_tasks(self) -> list[sqlite3.Row]:
         return list(
             self.connection.execute(

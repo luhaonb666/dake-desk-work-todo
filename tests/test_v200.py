@@ -315,6 +315,19 @@ class V200Tests(unittest.TestCase):
         self.db.add_task("今天未完成", "", "2026-09-01", None, False)
         self.assertEqual([task["title"] for task in self.db.all_tasks()], ["昨天完成", "今天未完成"])
 
+    def test_fixed_tasks_has_its_own_workspace_category_source(self) -> None:
+        self.db.add_task("普通事项", "", "2026-09-01", None, False)
+        fixed = self.db.add_task("固定事项", "", "2026-09-02", "10:00", True)
+        self.db.set_completed(fixed, True)
+        self.assertEqual([task["title"] for task in self.db.fixed_tasks()], ["固定事项"])
+
+    def test_windows_reminder_choice_stays_visible_until_time_is_selected(self) -> None:
+        dialog = TaskDialog()
+        self.assertFalse(dialog.windows_reminder_check.isHidden())
+        self.assertFalse(dialog.windows_reminder_check.isEnabled())
+        dialog.time_enabled.setChecked(True)
+        self.assertTrue(dialog.windows_reminder_check.isEnabled())
+
     def test_settings_dirty_state_and_no_wheel_controls(self) -> None:
         dialog = SettingsDialog(self.db, list(MainWindow.DEFAULT_GREETINGS))
         initial = dialog._comparison_state()

@@ -6,7 +6,6 @@ from PyQt6.QtCore import QDate, QTime, Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QCheckBox,
-    QFormLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -41,25 +40,19 @@ class WorkspaceEditor(QWidget):
         self._outer_layout.addWidget(self.hint)
 
         self.form_host = QWidget()
-        form = QFormLayout(self.form_host)
-        form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        form.setVerticalSpacing(10)
+        form = QVBoxLayout(self.form_host)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setSpacing(0)
 
         self.title_edit = TitleEditor()
         self.title_edit.setFixedHeight(76)
         self.title_edit.setPlaceholderText("事项标题（最多两行）")
+        self.title_edit.setToolTip("标题最多两行；Enter 转到说明；Shift + Enter 可换行。")
         self.title_edit.next_field_requested.connect(lambda: self.notes_edit.setFocus())
-        self.title_hint = QLabel("标题最多两行；Enter 转到说明；Shift + Enter 可换行。")
-        self.title_hint.setStyleSheet("font-size:11px; color:#9299a5;")
-        title_box = QVBoxLayout()
-        title_box.setContentsMargins(0, 0, 0, 0)
-        title_box.setSpacing(4)
-        title_box.addWidget(self.title_edit)
-        title_box.addWidget(self.title_hint)
 
         self.notes_edit = PlainNotesEditor()
-        self.notes_edit.setPlaceholderText("可补充说明、材料或下一步")
-        self.notes_edit.setMinimumHeight(240)
+        self.notes_edit.setPlaceholderText("具体事项、材料或下一步")
+        self.notes_edit.setMinimumHeight(380)
         self.notes_edit.setAcceptRichText(False)
 
         self.date_edit = CompactDatePicker(QDate.currentDate())
@@ -82,22 +75,25 @@ class WorkspaceEditor(QWidget):
         time_row.addWidget(self.minute_combo)
         time_row.addStretch()
 
-        self.windows_reminder_check = QCheckBox("重要事项：准点发送 Windows 系统提醒（需手动关闭）")
+        self.windows_reminder_check = QCheckBox("Windows 系统推送：准点提醒，需手动关闭")
         self.windows_reminder_check.setObjectName("windowsReminderCheck")
-        self.windows_reminder_check.setToolTip("默认关闭。勾选后，到准点会显示 Windows 右下角提醒，并保留在通知中心。")
+        self.windows_reminder_check.setToolTip("先勾选“有具体时间”后可启用。默认关闭；提醒会保留在 Windows 通知中心。")
         self.windows_reminder_check.setStyleSheet(
             "QCheckBox#windowsReminderCheck { color:#2458bf; font-weight:600; padding:5px 7px; "
             "border:1px solid #b9ccff; border-radius:8px; background:#eef4ff; }"
         )
-        self.time_enabled.toggled.connect(self.windows_reminder_check.setVisible)
+        self.time_enabled.toggled.connect(self._sync_windows_reminder_availability)
         self.fixed_check = QCheckBox("固定钉住待办（显示在当天列表最底部）")
 
-        form.addRow("事项", title_box)
-        form.addRow("说明", self.notes_edit)
-        form.addRow("日期", self.date_edit)
-        form.addRow("时间", time_row)
-        form.addRow("", self.windows_reminder_check)
-        form.addRow("", self.fixed_check)
+        form.addWidget(self.title_edit)
+        form.addWidget(self.notes_edit, 1)
+        settings_label = QLabel("时间与提醒")
+        settings_label.setStyleSheet("font-size:12px; color:#718096; font-weight:600; padding:14px 0 5px;")
+        form.addWidget(settings_label)
+        form.addWidget(self.date_edit)
+        form.addLayout(time_row)
+        form.addWidget(self.windows_reminder_check)
+        form.addWidget(self.fixed_check)
         self._outer_layout.addWidget(self.form_host, 1)
 
         self.action_bar = QWidget()
@@ -125,6 +121,11 @@ class WorkspaceEditor(QWidget):
         self.windows_reminder_check.toggled.connect(self._refresh_status)
         self.fixed_check.toggled.connect(self._refresh_status)
         self.clear()
+
+    def _sync_windows_reminder_availability(self, enabled: bool) -> None:
+        self.windows_reminder_check.setEnabled(enabled)
+        if not enabled:
+            self.windows_reminder_check.setChecked(False)
 
     def detach_action_bar(self) -> QWidget:
         """Move Save controls outside the editor scroll area and keep them visible."""
@@ -157,7 +158,7 @@ class WorkspaceEditor(QWidget):
         self.notes_edit.clear()
         self.time_enabled.setChecked(False)
         self.windows_reminder_check.setChecked(False)
-        self.windows_reminder_check.setVisible(False)
+        self._sync_windows_reminder_availability(False)
         self.fixed_check.setChecked(False)
         self._loading = False
         self.form_host.setEnabled(False)
@@ -188,7 +189,7 @@ class WorkspaceEditor(QWidget):
             self.minute_combo.setCurrentIndex(index)
         supports_reminder = "windows_reminder_enabled" in task.keys()
         self.windows_reminder_check.setChecked(bool(supports_reminder and task["windows_reminder_enabled"]))
-        self.windows_reminder_check.setVisible(bool(due))
+        self._sync_windows_reminder_availability(bool(due))
         self.fixed_check.setChecked(bool(task["is_fixed"]))
         self._loading = False
         self.form_host.setEnabled(True)
@@ -227,7 +228,7 @@ class WorkspaceEditor(QWidget):
             self.hour_combo.setCurrentIndex(max(0, self.hour_combo.findData(int(hour))))
             self.minute_combo.setCurrentIndex(max(0, self.minute_combo.findData(int(minute))))
         self.windows_reminder_check.setChecked(values["windows_reminder_enabled"])
-        self.windows_reminder_check.setVisible(bool(values["due_time"]))
+        self._sync_windows_reminder_availability(bool(values["due_time"]))
         self.fixed_check.setChecked(values["is_fixed"])
         self._loading = False
         self._refresh_status()

@@ -147,8 +147,8 @@ class TaskDialog(QDialog):
         time_box.addWidget(self.hour_combo)
         time_box.addWidget(self.minute_combo)
         time_box.addStretch()
-        self.windows_reminder_check.setVisible(self.time_enabled.isChecked())
-        self.time_enabled.toggled.connect(self.windows_reminder_check.setVisible)
+        self._sync_windows_reminder_availability(self.time_enabled.isChecked())
+        self.time_enabled.toggled.connect(self._sync_windows_reminder_availability)
 
         self.fixed_check = QCheckBox("固定钉住待办（显示在当天列表最底部）")
         self.fixed_check.setChecked(bool(task and task["is_fixed"]))
@@ -185,6 +185,12 @@ class TaskDialog(QDialog):
             "is_fixed": self.fixed_check.isChecked(),
             "windows_reminder_enabled": bool(due_time) and self.windows_reminder_check.isChecked(),
         }
+
+    def _sync_windows_reminder_availability(self, enabled: bool) -> None:
+        """Keep the important-reminder choice visible and explain its prerequisite."""
+        self.windows_reminder_check.setEnabled(enabled)
+        if not enabled:
+            self.windows_reminder_check.setChecked(False)
 
     def duplicate_requested(self) -> bool:
         return not self.duplicate_check.isHidden() and self.duplicate_check.isChecked()

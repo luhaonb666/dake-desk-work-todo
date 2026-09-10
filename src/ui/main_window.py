@@ -416,7 +416,6 @@ class MainWindow(QMainWindow):
         self._workspace_active = False
         self._workspace_manual_opt_out = False
         self._workspace_scope = "today"
-        self._workspace_tab = 0
         self.workspace_selected_task_id: int | None = None
         self._workspace_list_signature = None
         self._workspace_cards: dict[int, TaskCard] = {}
@@ -532,6 +531,8 @@ class MainWindow(QMainWindow):
             QFrame#chromePanel { background:#f4f7fc; border:1px solid #dce6f5; border-radius:14px; }
             QFrame#previewArea { background:#e9ecef; border:1px solid #dde1e5; border-radius:13px; }
             QFrame#workspaceFloatPreview { background:#f4f7fb; border:1px solid #dbe4f0; border-radius:12px; }
+            QPushButton#workspaceScopeButton { text-align:left; min-height:30px; padding:5px 9px; color:#566476; }
+            QPushButton#workspaceScopeButton:checked { background:#eaf0ff; border:1px solid #90aaee; color:#315bb7; font-weight:600; }
         """)
         self._build_workspace_ui()
 
@@ -583,11 +584,40 @@ class MainWindow(QMainWindow):
         self.workspace_search.setClearButtonEnabled(True)
         self.workspace_search.textChanged.connect(self._render_workspace)
         left_layout.addWidget(self.workspace_search)
-        self.workspace_previous_button = QPushButton("之前未完成")
-        self.workspace_previous_button.setCheckable(True)
-        self.workspace_previous_button.setToolTip("查看今天之前仍未完成的事项")
-        self.workspace_previous_button.toggled.connect(self._set_workspace_previous_scope)
-        left_layout.addWidget(self.workspace_previous_button)
+        category_label = QLabel("事项分类")
+        category_label.setStyleSheet("font-size:12px; color:#718096; font-weight:600; margin-top:4px;")
+        left_layout.addWidget(category_label)
+        self.workspace_scope_buttons: dict[str, QPushButton] = {}
+        scope_options = (
+            ("today", "当日"),
+            ("unfinished", "未完成"),
+            ("all", "全部"),
+            ("fixed", "固定待办"),
+            ("previous", "之前未完成"),
+        )
+        for key, text in scope_options:
+            button = QPushButton(text)
+            button.setObjectName("workspaceScopeButton")
+            button.setCheckable(True)
+            button.clicked.connect(lambda _=False, value=key: self._set_workspace_scope(value))
+            self.workspace_scope_buttons[key] = button
+            left_layout.addWidget(button)
+        self.workspace_scope_buttons["today"].setChecked(True)
+        self.workspace_unfinished_filter_row = QWidget()
+        unfinished_filters = QVBoxLayout(self.workspace_unfinished_filter_row)
+        unfinished_filters.setContentsMargins(2, 2, 2, 2)
+        unfinished_filters.setSpacing(6)
+        filter_label = QLabel("未完成事项的日期")
+        filter_label.setStyleSheet("font-size:11px; color:#7b8795;")
+        unfinished_filters.addWidget(filter_label)
+        self.workspace_unfinished_date = CompactDatePicker(QDate.currentDate())
+        self.workspace_unfinished_date.dateChanged.connect(lambda _: self._render_workspace())
+        unfinished_filters.addWidget(self.workspace_unfinished_date)
+        self.workspace_all_unfinished = QCheckBox("查看全部未完成")
+        self.workspace_all_unfinished.toggled.connect(self._render_workspace)
+        unfinished_filters.addWidget(self.workspace_all_unfinished)
+        self.workspace_unfinished_filter_row.setVisible(False)
+        left_layout.addWidget(self.workspace_unfinished_filter_row)
         left_layout.addStretch(1)
         self.workspace_float_preview = WorkspaceFloatPreview()
         left_layout.addWidget(self.workspace_float_preview)
@@ -600,27 +630,6 @@ class MainWindow(QMainWindow):
         self.workspace_list_title = QLabel("当日事项")
         self.workspace_list_title.setStyleSheet("font-size:15px; color:#3c4b5e; font-weight:600;")
         center_layout.addWidget(self.workspace_list_title)
-        self.workspace_tabs = QTabBar()
-        self.workspace_tabs.addTab("当日")
-        self.workspace_tabs.addTab("未完成")
-        self.workspace_tabs.addTab("全部")
-        self.workspace_tabs.setStyleSheet("QTabBar::tab:last { margin-left:14px; }")
-        self.workspace_tabs.currentChanged.connect(self._set_workspace_tab)
-        center_layout.addWidget(self.workspace_tabs)
-        self.workspace_unfinished_filter_row = QWidget()
-        unfinished_filters = QHBoxLayout(self.workspace_unfinished_filter_row)
-        unfinished_filters.setContentsMargins(2, 0, 2, 2)
-        unfinished_filters.setSpacing(7)
-        unfinished_filters.addWidget(QLabel("查看日期"))
-        self.workspace_unfinished_date = CompactDatePicker(QDate.currentDate())
-        self.workspace_unfinished_date.dateChanged.connect(lambda _: self._render_workspace())
-        unfinished_filters.addWidget(self.workspace_unfinished_date)
-        self.workspace_all_unfinished = QCheckBox("查看全部未完成")
-        self.workspace_all_unfinished.toggled.connect(self._render_workspace)
-        unfinished_filters.addWidget(self.workspace_all_unfinished)
-        unfinished_filters.addStretch()
-        self.workspace_unfinished_filter_row.setVisible(False)
-        center_layout.addWidget(self.workspace_unfinished_filter_row)
         self.workspace_scroll = QScrollArea()
         self.workspace_scroll.setWidgetResizable(True)
         self.workspace_scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -707,23 +716,13 @@ class MainWindow(QMainWindow):
             if item.widget():
                 item.widget().deleteLater()
 
-    def _set_workspace_previous_scope(self, enabled: bool) -> None:
-        self._workspace_scope = "previous" if enabled else "today"
-        if enabled:
-            self.workspace_tabs.blockSignals(True)
-            self.workspace_tabs.setCurrentIndex(0)
-            self.workspace_tabs.blockSignals(False)
-            self._workspace_tab = 0
-            self.workspace_unfinished_filter_row.setVisible(False)
-        self._render_workspace()
-
-    def _set_workspace_tab(self, index: int) -> None:
-        self._workspace_tab = index
-        self._workspace_scope = "today"
-        self.workspace_previous_button.blockSignals(True)
-        self.workspace_previous_button.setChecked(False)
-        self.workspace_previous_button.blockSignals(False)
-        self.workspace_unfinished_filter_row.setVisible(index == 1)
+    def _set_workspace_scope(self, scope: str) -> None:
+        self._workspace_scope = scope
+        for key, button in self.workspace_scope_buttons.items():
+            button.blockSignals(True)
+            button.setChecked(key == scope)
+            button.blockSignals(False)
+        self.workspace_unfinished_filter_row.setVisible(scope == "unfinished")
         self._render_workspace()
 
     def _workspace_should_be_active(self) -> bool:
@@ -780,10 +779,7 @@ class MainWindow(QMainWindow):
         today = self.db.today()
         pending = self.db.all_pending_tasks()
         previous = [task for task in pending if task["task_date"] < today]
-        self.workspace_previous_button.blockSignals(True)
-        self.workspace_previous_button.setText(f"之前未完成（{len(previous)}）")
-        self.workspace_previous_button.setChecked(self._workspace_scope == "previous")
-        self.workspace_previous_button.blockSignals(False)
+        self.workspace_scope_buttons["previous"].setText(f"之前未完成（{len(previous)}）")
         query = self.workspace_search.text().strip().casefold()
         if query:
             tasks = [
@@ -794,10 +790,13 @@ class MainWindow(QMainWindow):
         elif self._workspace_scope == "previous":
             tasks = previous
             label = f"之前未完成（{len(tasks)}）"
-        elif self._workspace_tab == 2:
+        elif self._workspace_scope == "all":
             tasks = self.db.all_tasks()
             label = "全部事项"
-        elif self._workspace_tab == 1:
+        elif self._workspace_scope == "fixed":
+            tasks = self.db.fixed_tasks()
+            label = f"固定待办（{len(tasks)}）"
+        elif self._workspace_scope == "unfinished":
             if self.workspace_all_unfinished.isChecked():
                 tasks = pending
                 label = f"全部未完成（{len(tasks)}）"
@@ -845,15 +844,22 @@ class MainWindow(QMainWindow):
         self._workspace_cards = {}
         self._workspace_list_signature = signature
         if not tasks:
-            message = "没有找到匹配事项。" if self.workspace_search.text().strip() else (
-                "之前没有未完成的事项。" if self._workspace_scope == "previous" else "今天还没有事项。"
-            )
+            message = "没有找到匹配事项。" if self.workspace_search.text().strip() else {
+                "previous": "之前没有未完成的事项。",
+                "fixed": "还没有固定待办。",
+                "all": "还没有保存的事项。",
+                "unfinished": "这一天没有未完成事项。",
+            }.get(self._workspace_scope, "今天还没有事项。")
             empty = QLabel(message)
             empty.setStyleSheet("color:#87909c; padding:30px 6px;")
             self.workspace_list_layout.addWidget(empty)
         else:
             current_day = None
-            should_group_dates = bool(self.workspace_search.text().strip() or self._workspace_scope == "previous")
+            should_group_dates = bool(
+                self.workspace_search.text().strip()
+                or self._workspace_scope in {"previous", "all", "fixed"}
+                or (self._workspace_scope == "unfinished" and self.workspace_all_unfinished.isChecked())
+            )
             for task in tasks:
                 if should_group_dates and task["task_date"] != current_day:
                     current_day = task["task_date"]
