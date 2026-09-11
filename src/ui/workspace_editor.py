@@ -76,9 +76,9 @@ class WorkspaceEditor(QWidget):
         time_row.addWidget(self.minute_combo)
         time_row.addStretch()
 
-        self.windows_reminder_check = QCheckBox("Windows 系统推送：准点提醒，需手动关闭")
+        self.windows_reminder_check = QCheckBox("重要事项：准点强提醒（需手动关闭）")
         self.windows_reminder_check.setObjectName("windowsReminderCheck")
-        self.windows_reminder_check.setToolTip("先勾选“有具体时间”后可启用。默认关闭；提醒会保留在 Windows 通知中心。")
+        self.windows_reminder_check.setToolTip("先勾选“有具体时间”后可启用。软件会弹出置顶提醒，Windows 通知可用时会作为额外提醒。")
         self.windows_reminder_check.setStyleSheet(
             "QCheckBox#windowsReminderCheck { color:#2458bf; font-weight:600; padding:5px 7px 5px 0; "
             "border:1px solid #b9ccff; border-radius:8px; background:#eef4ff; }"

@@ -1,4 +1,4 @@
-"""Focused V4.3 regression checks for settings, reminders, and task views."""
+"""Focused V4.3.1 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -515,6 +515,20 @@ class V200Tests(unittest.TestCase):
             datetime(2026, 9, 1, 9, 30),
         )
         self.assertEqual([(item.task_id, item.title, item.due_time) for item in plan], [(enabled, "重要会议", "10:00")])
+
+    def test_important_reminder_waits_for_manual_acknowledgement(self) -> None:
+        important = self.db.add_task("签合同", "等对方确认", "2026-09-01", "10:00", False, True)
+        now = datetime(2026, 9, 1, 10, 1)
+        self.assertEqual(
+            [task["id"] for task in self.db.pending_important_reminder_tasks(now)], [important]
+        )
+        self.db.acknowledge_important_reminder(important)
+        self.assertEqual(self.db.pending_important_reminder_tasks(now), [])
+        self.db.update_task(important, task_date="2026-09-01", due_time="10:10")
+        self.assertEqual(
+            [task["id"] for task in self.db.pending_important_reminder_tasks(datetime(2026, 9, 1, 10, 11))],
+            [important],
+        )
 
     def test_unchanged_time_does_not_rearm_a_reminder(self) -> None:
         task_id = self.db.add_task("重要会议", "初稿", "2026-09-01", "10:00", False)

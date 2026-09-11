@@ -22,6 +22,7 @@ from services.windows_notifications import WindowsReminderService
 from storage.database import Database
 from ui.controls import CompactDatePicker, normalize_note_text
 from ui.float_window import FloatBadge, FloatWindow
+from ui.important_reminder import ImportantReminderWindow
 from ui.settings_dialog import SettingsDialog
 from ui.task_dialog import TaskDialog
 from ui.theme import APP_STYLE, TASK_CARD_COLORS
@@ -29,7 +30,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.3"
+APP_VERSION = "4.3.1"
 
 
 def app_icon() -> QIcon:
@@ -309,6 +310,7 @@ class MainWindow(QMainWindow):
         self._ensure_v37_float_hint_copy()
         self._ensure_v41_workspace_layout()
         self._ensure_v42_workspace_layout()
+        self._ensure_v431_workspace_layout()
         self.setWindowTitle(f"{APP_NAME} V{APP_VERSION}")
         self.setWindowIcon(app_icon())
         self.resize(760, 760)
@@ -317,6 +319,9 @@ class MainWindow(QMainWindow):
         self.float_window.open_requested.connect(self.show_editor)
         self.float_window.collapsed_after_alert.connect(self.finish_float_alert)
         self.float_window.position_changed.connect(self.save_float_position)
+        self.important_reminder = ImportantReminderWindow()
+        self.important_reminder.setWindowIcon(self.windowIcon())
+        self.important_reminder.acknowledged.connect(self.acknowledge_important_reminder)
         stored_y = self.db.get_setting("float_dock_y", "")
         if stored_y.isdigit():
             self.float_window.set_dock_y(int(stored_y))
@@ -462,6 +467,13 @@ class MainWindow(QMainWindow):
         # Reset that V4.2 default once; later user drags are still preserved.
         self.db.set_setting("workspace_splitter_sizes", json.dumps([220, 430, 350]))
         self.db.set_setting("workspace_layout_v420_hotfix_seeded", "1")
+
+    def _ensure_v431_workspace_layout(self) -> None:
+        """Apply the next agreed three-column ratio once, then preserve user drags."""
+        if self.db.get_setting("workspace_layout_v431_seeded", "0") == "1":
+            return
+        self.db.set_setting("workspace_splitter_sizes", json.dumps([270, 430, 300]))
+        self.db.set_setting("workspace_layout_v431_seeded", "1")
 
     def _build_ui(self) -> None:
         self._workspace_active = False
@@ -735,7 +747,7 @@ class MainWindow(QMainWindow):
                 return [int(value) for value in values]
         except (TypeError, ValueError, json.JSONDecodeError):
             pass
-        return [220, 430, 350]
+        return [270, 430, 300]
 
     def _save_workspace_splitter_sizes(self) -> None:
         self.db.set_setting("workspace_splitter_sizes", json.dumps(self.workspace_splitter.sizes()))
@@ -1181,6 +1193,8 @@ class MainWindow(QMainWindow):
         if self._is_past_due(values):
             self.db.mark_alerted(task_id, "pre")
             self.db.mark_alerted(task_id, "due")
+            if values.get("windows_reminder_enabled"):
+                self.db.acknowledge_important_reminder(task_id)
 
     def add_task(self) -> None:
         dialog = TaskDialog(parent=self)
@@ -1212,12 +1226,15 @@ class MainWindow(QMainWindow):
 
     def set_completed(self, task_id: int, completed: bool) -> None:
         self.db.set_completed(task_id, completed)
+        if completed:
+            self.important_reminder.remove_task(task_id)
         self._sync_windows_reminders()
         self.render()
 
     def delete_task(self, task) -> None:
         if QMessageBox.question(self, "删除事项", "确定删除这条事项吗？") == QMessageBox.StandardButton.Yes:
             self.db.delete_task(task["id"])
+            self.important_reminder.remove_task(task["id"])
             if self.workspace_selected_task_id == task["id"]:
                 self.workspace_selected_task_id = None
                 self.workspace_editor.clear()
@@ -1225,11 +1242,19 @@ class MainWindow(QMainWindow):
             self.render()
 
     def _sync_windows_reminders(self) -> None:
-        """Keep Windows' scheduled reminders aligned with local important tasks."""
+        """Use Windows notifications as an optional extra channel for important tasks."""
         count = self.windows_reminders.sync(self.db.future_windows_reminder_tasks(datetime.now()))
         if self.windows_reminders.error and sys.platform == "win32":
             logging.warning("Windows reminder schedule is unavailable: %s", self.windows_reminders.error)
         logging.info("Scheduled %s opt-in Windows reminder(s)", count)
+
+    def _refresh_important_reminders(self, now: datetime | None = None) -> None:
+        """Keep the app-owned manual-dismiss window in sync with due work."""
+        self.important_reminder.sync_tasks(self.db.pending_important_reminder_tasks(now or datetime.now()))
+
+    def acknowledge_important_reminder(self, task_id: int) -> None:
+        self.db.acknowledge_important_reminder(task_id)
+        self._refresh_important_reminders()
 
     def open_float_menu(self, task) -> None:
         menu = QMenu(self)
@@ -1525,6 +1550,7 @@ class MainWindow(QMainWindow):
             self._trigger_float(message, reminder_kind=reminder_kind)
             if self.isVisible():
                 self.show_notice(message)
+        self._refresh_important_reminders(now)
 
     def finish_float_alert(self) -> None:
         self.alert_task_ids.clear()
@@ -1624,6 +1650,7 @@ class MainWindow(QMainWindow):
 
     def quit_app(self) -> None:
         self.float_window.hide()
+        self.important_reminder.hide()
         self.tray.hide()
         self.db.close()
         QApplication.quit()

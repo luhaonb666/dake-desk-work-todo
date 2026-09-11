@@ -9,7 +9,7 @@ from typing import Any, Iterable
 
 
 class Database:
-    SCHEMA_VERSION = 4
+    SCHEMA_VERSION = 5
 
     def __init__(self, path: Path) -> None:
         self.connection = sqlite3.connect(path)
@@ -89,6 +89,11 @@ class Database:
                     "ALTER TABLE tasks ADD COLUMN windows_reminder_enabled INTEGER NOT NULL DEFAULT 0"
                 )
             version = 4
+        if version < 5:
+            columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(tasks)")}
+            if "important_acknowledged_at" not in columns:
+                self.connection.execute("ALTER TABLE tasks ADD COLUMN important_acknowledged_at TEXT")
+            version = 5
         self.connection.execute(
             "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)",
             (str(version),),
@@ -149,6 +154,7 @@ class Database:
         if time_changed:
             values["pre_alerted_at"] = None
             values["due_alerted_at"] = None
+            values["important_acknowledged_at"] = None
         values["updated_at"] = datetime.now().isoformat(timespec="seconds")
         assignments = ", ".join(f"{key} = ?" for key in values)
         self.connection.execute(
@@ -263,6 +269,30 @@ class Database:
                    ORDER BY task_date ASC, due_time ASC, created_at ASC"""
             ).fetchall()
         )
+
+    def pending_important_reminder_tasks(self, now: datetime) -> list[sqlite3.Row]:
+        """Important due items which have not yet received the user's acknowledgement."""
+        return list(
+            self.connection.execute(
+                """SELECT * FROM tasks
+                   WHERE windows_reminder_enabled = 1
+                     AND due_time IS NOT NULL
+                     AND is_completed = 0
+                     AND important_acknowledged_at IS NULL
+                     AND deleted_at IS NULL
+                     AND datetime(task_date || ' ' || due_time) <= datetime(?)
+                   ORDER BY task_date ASC, due_time ASC, created_at ASC""",
+                (now.strftime("%Y-%m-%d %H:%M:%S"),),
+            ).fetchall()
+        )
+
+    def acknowledge_important_reminder(self, task_id: int) -> None:
+        now = datetime.now().isoformat(timespec="seconds")
+        self.connection.execute(
+            "UPDATE tasks SET important_acknowledged_at = ?, updated_at = ? WHERE id = ?",
+            (now, now, task_id),
+        )
+        self.connection.commit()
 
     def mark_alerted(self, task_id: int, kind: str) -> None:
         column = "pre_alerted_at" if kind == "pre" else "due_alerted_at"

@@ -121,13 +121,13 @@ class TaskDialog(QDialog):
             bool(task and task_supports_system_reminder and task["windows_reminder_enabled"])
         )
         self.windows_reminder_check.setToolTip(
-            "默认关闭。勾选后，到准点会显示 Windows 右下角提醒，并保留在通知中心。"
+            "默认关闭。勾选后，到准点会显示软件内的置顶强提醒；Windows 通知可用时会作为额外提醒。"
         )
         self.windows_reminder_check.setStyleSheet(
             "QCheckBox#windowsReminderIndicator { padding:0; margin:0; border:none; background:transparent; }"
             "QCheckBox#windowsReminderIndicator::indicator { width:17px; height:17px; margin:0; }"
         )
-        self.windows_reminder_label = QLabel("重要事项：准点发送 Windows 系统提醒（需手动关闭）")
+        self.windows_reminder_label = QLabel("重要事项：准点强提醒（需手动关闭）")
         self.windows_reminder_label.setStyleSheet("color:#0659c9; font-weight:600; background:transparent;")
         self.windows_reminder_label.setToolTip(self.windows_reminder_check.toolTip())
         self.windows_reminder_box = QFrame()
