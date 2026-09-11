@@ -321,7 +321,7 @@ class MainWindow(QMainWindow):
         self.float_window.position_changed.connect(self.save_float_position)
         self.important_reminder = ImportantReminderWindow()
         self.important_reminder.setWindowIcon(self.windowIcon())
-        self.important_reminder.acknowledged.connect(self.acknowledge_important_reminder)
+        self.important_reminder.dismissed.connect(self.dismiss_important_reminder)
         stored_y = self.db.get_setting("float_dock_y", "")
         if stored_y.isdigit():
             self.float_window.set_dock_y(int(stored_y))
@@ -1252,7 +1252,8 @@ class MainWindow(QMainWindow):
         """Keep the app-owned manual-dismiss window in sync with due work."""
         self.important_reminder.sync_tasks(self.db.pending_important_reminder_tasks(now or datetime.now()))
 
-    def acknowledge_important_reminder(self, task_id: int) -> None:
+    def dismiss_important_reminder(self, task_id: int) -> None:
+        """Dismiss the reminder only; the underlying task remains unfinished."""
         self.db.acknowledge_important_reminder(task_id)
         self._refresh_important_reminders()
 

@@ -7,9 +7,9 @@ from PyQt6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QPushButt
 
 
 class ImportantReminderWindow(QWidget):
-    """Stay visible at the lower-right until each important item is acknowledged."""
+    """Stay visible at the lower-right until each important item is dismissed."""
 
-    acknowledged = pyqtSignal(int)
+    dismissed = pyqtSignal(int)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -39,6 +39,16 @@ class ImportantReminderWindow(QWidget):
         self.queue_label = QLabel()
         self.queue_label.setStyleSheet("font-size:11px; color:#9a6d24; background:transparent; border:none;")
         heading.addWidget(self.queue_label)
+        self.close_button = QPushButton("×")
+        self.close_button.setAccessibleName("关闭提醒")
+        self.close_button.setToolTip("关闭提醒，不会完成待办")
+        self.close_button.setFixedSize(24, 24)
+        self.close_button.setStyleSheet(
+            "QPushButton { color:#8a5600; background:transparent; border:none; font-size:22px; padding:0; }"
+            "QPushButton:hover { color:#5d3a00; background:#f7e4bd; border-radius:12px; }"
+        )
+        self.close_button.clicked.connect(self._dismiss_current)
+        heading.addWidget(self.close_button)
         layout.addLayout(heading)
 
         self.time_label = QLabel()
@@ -58,16 +68,16 @@ class ImportantReminderWindow(QWidget):
         divider.setFrameShape(QFrame.Shape.HLine)
         divider.setStyleSheet("color:#efd9ad; border:none; background:#efd9ad; max-height:1px;")
         layout.addWidget(divider)
-        hint = QLabel("此提醒会一直保留，直到你手动确认。")
+        hint = QLabel("此提醒会保留到你看见它；关闭提醒不会完成待办。")
         hint.setStyleSheet("font-size:11px; color:#9b7a42; background:transparent; border:none;")
         layout.addWidget(hint)
-        self.ack_button = QPushButton("我已处理")
-        self.ack_button.setStyleSheet(
+        self.dismiss_button = QPushButton("关闭提醒")
+        self.dismiss_button.setStyleSheet(
             "QPushButton { background:#d48a0b; border:none; border-radius:9px; color:white; font-weight:600; padding:8px 14px; }"
             "QPushButton:hover { background:#b87608; }"
         )
-        self.ack_button.clicked.connect(self._acknowledge_current)
-        layout.addWidget(self.ack_button, 0, Qt.AlignmentFlag.AlignRight)
+        self.dismiss_button.clicked.connect(self._dismiss_current)
+        layout.addWidget(self.dismiss_button, 0, Qt.AlignmentFlag.AlignRight)
 
     def sync_tasks(self, tasks) -> None:
         """Replace the current pending set without dismissing an active reminder."""
@@ -89,9 +99,9 @@ class ImportantReminderWindow(QWidget):
             self._current_id = self._order[0] if self._order else None
         self._refresh()
 
-    def _acknowledge_current(self) -> None:
+    def _dismiss_current(self) -> None:
         if self._current_id is not None:
-            self.acknowledged.emit(self._current_id)
+            self.dismissed.emit(self._current_id)
 
     def _refresh(self) -> None:
         if self._current_id is None:
@@ -116,6 +126,7 @@ class ImportantReminderWindow(QWidget):
         self.move(area.right() - self.width() - 22, area.bottom() - self.height() - 22)
 
     def closeEvent(self, event):  # noqa: N802
-        # Alt+F4 and the title-bar close path must not silently defeat a
-        # persistent important reminder.  “我已处理” is the only dismissal.
-        event.ignore()
+        # The reminder must survive while the user is away, but closing it is
+        # never a claim that the task itself has been completed.
+        self._dismiss_current()
+        event.accept()
