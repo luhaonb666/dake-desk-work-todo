@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
 
 
 class Database:
-    SCHEMA_VERSION = 5
+    SCHEMA_VERSION = 6
 
     def __init__(self, path: Path) -> None:
         self.connection = sqlite3.connect(path)
@@ -94,6 +94,27 @@ class Database:
             if "important_acknowledged_at" not in columns:
                 self.connection.execute("ALTER TABLE tasks ADD COLUMN important_acknowledged_at TEXT")
             version = 5
+        if version < 6:
+            columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(tasks)")}
+            if "important_snoozed_until" not in columns:
+                self.connection.execute("ALTER TABLE tasks ADD COLUMN important_snoozed_until TEXT")
+            self.connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS task_steps (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    content TEXT NOT NULL,
+                    is_completed INTEGER NOT NULL DEFAULT 0,
+                    position INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_task_steps_task_position
+                    ON task_steps(task_id, position, id);
+                """
+            )
+            version = 6
         self.connection.execute(
             "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)",
             (str(version),),
@@ -155,6 +176,7 @@ class Database:
             values["pre_alerted_at"] = None
             values["due_alerted_at"] = None
             values["important_acknowledged_at"] = None
+            values["important_snoozed_until"] = None
         values["updated_at"] = datetime.now().isoformat(timespec="seconds")
         assignments = ", ".join(f"{key} = ?" for key in values)
         self.connection.execute(
@@ -181,6 +203,43 @@ class Database:
     def delete_task(self, task_id: int) -> None:
         self.connection.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
         self.connection.commit()
+
+    def task_steps(self, task_id: int) -> list[sqlite3.Row]:
+        return list(
+            self.connection.execute(
+                """SELECT * FROM task_steps WHERE task_id = ?
+                   ORDER BY position ASC, id ASC""",
+                (task_id,),
+            ).fetchall()
+        )
+
+    def replace_task_steps(self, task_id: int, steps: Iterable[dict[str, Any]]) -> None:
+        """Persist an item's optional, ordered execution steps in one save."""
+        cleaned = []
+        for step in steps:
+            content = str(step.get("content", "")).strip()
+            if content:
+                cleaned.append((content, int(bool(step.get("is_completed", False)))))
+        now = datetime.now().isoformat(timespec="seconds")
+        self.connection.execute("DELETE FROM task_steps WHERE task_id = ?", (task_id,))
+        self.connection.executemany(
+            """INSERT INTO task_steps(task_id, content, is_completed, position, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            [(task_id, content, completed, position, now, now) for position, (content, completed) in enumerate(cleaned)],
+        )
+        self.connection.commit()
+
+    def step_summaries(self, task_ids: Iterable[int]) -> dict[int, tuple[int, int]]:
+        ids = [int(task_id) for task_id in task_ids]
+        if not ids:
+            return {}
+        placeholders = ", ".join("?" for _ in ids)
+        rows = self.connection.execute(
+            f"""SELECT task_id, SUM(is_completed) AS completed_count, COUNT(*) AS total_count
+                FROM task_steps WHERE task_id IN ({placeholders}) GROUP BY task_id""",
+            ids,
+        ).fetchall()
+        return {int(row["task_id"]): (int(row["completed_count"]), int(row["total_count"])) for row in rows}
 
     def tasks_for(self, task_date: str, pending_only: bool = False) -> list[sqlite3.Row]:
         sql = "SELECT * FROM tasks WHERE task_date = ? AND deleted_at IS NULL"
@@ -279,10 +338,11 @@ class Database:
                      AND due_time IS NOT NULL
                      AND is_completed = 0
                      AND important_acknowledged_at IS NULL
+                     AND (important_snoozed_until IS NULL OR datetime(important_snoozed_until) <= datetime(?))
                      AND deleted_at IS NULL
                      AND datetime(task_date || ' ' || due_time) <= datetime(?)
                    ORDER BY task_date ASC, due_time ASC, created_at ASC""",
-                (now.strftime("%Y-%m-%d %H:%M:%S"),),
+                (now.strftime("%Y-%m-%d %H:%M:%S"), now.strftime("%Y-%m-%d %H:%M:%S")),
             ).fetchall()
         )
 
@@ -291,6 +351,16 @@ class Database:
         self.connection.execute(
             "UPDATE tasks SET important_acknowledged_at = ?, updated_at = ? WHERE id = ?",
             (now, now, task_id),
+        )
+        self.connection.commit()
+
+    def snooze_important_reminder(self, task_id: int, minutes: int, now: datetime | None = None) -> None:
+        """Hide one important alert briefly without marking its task complete."""
+        current = now or datetime.now()
+        snoozed_until = current + timedelta(minutes=minutes)
+        self.connection.execute(
+            "UPDATE tasks SET important_snoozed_until = ?, updated_at = ? WHERE id = ?",
+            (snoozed_until.isoformat(timespec="seconds"), current.isoformat(timespec="seconds"), task_id),
         )
         self.connection.commit()
 

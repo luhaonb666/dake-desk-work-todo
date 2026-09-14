@@ -30,7 +30,7 @@ pyinstaller --noconfirm --clean --windowed --onefile --icon assets\dake-desk-ico
   --hidden-import ui.float_window ^
   --hidden-import ui.settings_dialog ^
   --hidden-import ui.theme ^
-  --hidden-import ui.controls --hidden-import ui.workspace_editor --hidden-import ui.important_reminder ^
+  --hidden-import ui.controls --hidden-import ui.workspace_editor --hidden-import ui.important_reminder --hidden-import ui.task_steps --hidden-import ui.desktop_note ^
   --name DaKeDesk src\main.py
 if errorlevel 1 (
   echo Program build failed. Please keep this window open and send the error text or screenshot.

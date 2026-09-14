@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 
 from ui.controls import CompactDatePicker, NoWheelComboBox, TIME_HOURS, TIME_MINUTES, normalize_note_text
 from ui.task_dialog import PlainNotesEditor, TitleEditor
+from ui.task_steps import TaskStepsEditor
 
 
 class WorkspaceEditor(QWidget):
@@ -55,6 +56,7 @@ class WorkspaceEditor(QWidget):
         self.notes_edit.setPlaceholderText("具体事项、材料或下一步")
         self.notes_edit.setMinimumHeight(380)
         self.notes_edit.setAcceptRichText(False)
+        self.steps_editor = TaskStepsEditor()
 
         self.date_edit = CompactDatePicker(QDate.currentDate())
         self.time_enabled = QCheckBox("有具体时间")
@@ -88,6 +90,7 @@ class WorkspaceEditor(QWidget):
 
         form.addWidget(self.title_edit)
         form.addWidget(self.notes_edit, 1)
+        form.addWidget(self.steps_editor)
         settings_label = QLabel("时间与提醒")
         settings_label.setStyleSheet("font-size:12px; color:#718096; font-weight:600; padding:14px 0 5px;")
         form.addWidget(settings_label)
@@ -121,6 +124,7 @@ class WorkspaceEditor(QWidget):
         QShortcut(QKeySequence("Ctrl+S"), self, activated=self._emit_save)
         self.title_edit.textChanged.connect(self._refresh_status)
         self.notes_edit.textChanged.connect(self._refresh_status)
+        self.steps_editor.changed.connect(self._refresh_status)
         self.date_edit.dateChanged.connect(self._refresh_status)
         self.time_enabled.toggled.connect(self._refresh_status)
         self.hour_combo.currentIndexChanged.connect(self._refresh_status)
@@ -167,13 +171,14 @@ class WorkspaceEditor(QWidget):
         self.windows_reminder_check.setChecked(False)
         self._sync_windows_reminder_availability(False)
         self.fixed_check.setChecked(False)
+        self.steps_editor.set_steps([])
         self._loading = False
         self.form_host.setEnabled(False)
         self.restore_button.setEnabled(False)
         self.save_button.setEnabled(False)
         self.set_status_message("选择一条事项后可编辑")
 
-    def load_task(self, task) -> None:
+    def load_task(self, task, task_steps=None) -> None:
         if task is None:
             self.clear()
             return
@@ -183,6 +188,7 @@ class WorkspaceEditor(QWidget):
         self.hint.setText("可以安心复制或调整内容；点击保存后才会写入这条事项。")
         self.title_edit.setPlainText(task["title"])
         self.notes_edit.setPlainText(normalize_note_text(task["notes"]))
+        self.steps_editor.set_steps(task_steps)
         self.date_edit.setDate(QDate.fromString(task["task_date"], "yyyy-MM-dd"))
         due = task["due_time"]
         self.time_enabled.setChecked(bool(due))
@@ -216,6 +222,7 @@ class WorkspaceEditor(QWidget):
             "due_time": due_time,
             "is_fixed": self.fixed_check.isChecked(),
             "windows_reminder_enabled": bool(due_time) and self.windows_reminder_check.isChecked(),
+            "steps": self.steps_editor.values(),
         }
 
     def is_dirty(self) -> bool:
@@ -237,6 +244,7 @@ class WorkspaceEditor(QWidget):
         self.windows_reminder_check.setChecked(values["windows_reminder_enabled"])
         self._sync_windows_reminder_availability(bool(values["due_time"]))
         self.fixed_check.setChecked(values["is_fixed"])
+        self.steps_editor.set_steps(values.get("steps", []))
         self._loading = False
         self._refresh_status()
 
@@ -250,6 +258,6 @@ class WorkspaceEditor(QWidget):
         self.set_status_message("正在保存…")
         self.save_requested.emit(self._task_id, values)
 
-    def mark_saved(self, task) -> None:
+    def mark_saved(self, task, task_steps=None) -> None:
         """Reload the authoritative saved row as the next clean baseline."""
-        self.load_task(task)
+        self.load_task(task, task_steps)

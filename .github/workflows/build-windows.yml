@@ -23,7 +23,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run V4.3.1 regression tests
+      - name: Run V4.5 regression tests
         env:
           PYTHONPATH: src
           QT_QPA_PLATFORM: offscreen
@@ -36,7 +36,7 @@ jobs:
           --hidden-import storage.database --hidden-import ui.main_window
           --hidden-import ui.task_dialog --hidden-import ui.float_window
           --hidden-import ui.settings_dialog --hidden-import ui.theme
-          --hidden-import ui.controls --hidden-import ui.workspace_editor --hidden-import ui.important_reminder
+          --hidden-import ui.controls --hidden-import ui.workspace_editor --hidden-import ui.important_reminder --hidden-import ui.task_steps --hidden-import ui.desktop_note
           --name DaKeDesk src/main.py
 
       - name: Install Inno Setup

@@ -21,6 +21,7 @@ from app_paths import app_data_dir
 from services.windows_notifications import WindowsReminderService
 from storage.database import Database
 from ui.controls import CompactDatePicker, normalize_note_text
+from ui.desktop_note import DesktopNoteDialog, DesktopNoteWindow
 from ui.float_window import FloatBadge, FloatWindow
 from ui.important_reminder import ImportantReminderWindow
 from ui.settings_dialog import SettingsDialog
@@ -30,7 +31,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.3.1"
+APP_VERSION = "4.5"
 
 
 def app_icon() -> QIcon:
@@ -148,7 +149,7 @@ class TaskCard(QFrame):
     def __init__(
         self, task, on_complete, on_edit, on_float, on_delete, parent=None,
         preview: bool = False, on_select=None, selected: bool = False,
-        workspace_mode: bool = False,
+        workspace_mode: bool = False, step_summary: tuple[int, int] = (0, 0), on_move_today=None,
     ) -> None:
         super().__init__(parent)
         self._on_select = on_select
@@ -194,6 +195,18 @@ class TaskCard(QFrame):
                 # must not consume the click that opens the right-side editor.
                 notes.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             content.addWidget(notes)
+        completed_steps, total_steps = step_summary
+        if total_steps:
+            progress = QLabel(
+                "待办步骤已完成 · 可勾选事项" if completed_steps == total_steps
+                else f"待办步骤 {completed_steps}/{total_steps}"
+            )
+            progress.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            progress.setStyleSheet(
+                "font-size:11px; color:#9a6d24; font-weight:600; margin-top:2px;"
+                if completed_steps == total_steps else "font-size:11px; color:#8793a2; margin-top:2px;"
+            )
+            content.addWidget(progress)
         if overdue:
             warning = QLabel("已超时")
             warning.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -201,10 +214,14 @@ class TaskCard(QFrame):
             content.addWidget(warning)
         layout.addLayout(content, 1)
         actions = [] if workspace_mode else [("编辑", lambda: on_edit(task))]
+        if on_move_today:
+            actions.append(("移到今天", lambda: on_move_today(task)))
         actions.extend([("浮窗重点位", lambda: on_float(task)), ("删除", lambda: on_delete(task))])
         for text, callback in actions:
             button = QPushButton(text)
             button.setObjectName("quietButton")
+            if text == "移到今天":
+                button.setToolTip("直接把原事项改到今天；若要保留原事项，请使用“新增复制该条事项”。")
             button.clicked.connect(callback)
             layout.addWidget(button, 0, Qt.AlignmentFlag.AlignTop)
 
@@ -319,9 +336,15 @@ class MainWindow(QMainWindow):
         self.float_window.open_requested.connect(self.show_editor)
         self.float_window.collapsed_after_alert.connect(self.finish_float_alert)
         self.float_window.position_changed.connect(self.save_float_position)
+        self.desktop_note = DesktopNoteWindow()
+        self.desktop_note.setWindowIcon(self.windowIcon())
+        self.desktop_note.content_saved.connect(self.save_desktop_note_content)
+        self.desktop_note.layout_changed.connect(self.save_desktop_note_layout)
+        self.desktop_note.hide_requested.connect(self.hide_desktop_note)
         self.important_reminder = ImportantReminderWindow()
         self.important_reminder.setWindowIcon(self.windowIcon())
         self.important_reminder.dismissed.connect(self.dismiss_important_reminder)
+        self.important_reminder.snoozed.connect(self.snooze_important_reminder)
         stored_y = self.db.get_setting("float_dock_y", "")
         if stored_y.isdigit():
             self.float_window.set_dock_y(int(stored_y))
@@ -341,6 +364,7 @@ class MainWindow(QMainWindow):
         self.render()
         self._sync_windows_reminders()
         QTimer.singleShot(250, self.restore_float)
+        QTimer.singleShot(300, self.restore_desktop_note)
         QTimer.singleShot(1_000, self.check_reminders)
 
     def _ensure_v21_greetings(self) -> None:
@@ -519,6 +543,9 @@ class MainWindow(QMainWindow):
         self.float_button = QPushButton("关闭桌面浮窗")
         self.float_button.clicked.connect(self.toggle_float)
         header.addWidget(self.float_button)
+        note_manager = QPushButton("便签管理")
+        note_manager.clicked.connect(self.open_note_manager)
+        header.addWidget(note_manager)
         settings_button = QPushButton("设置")
         settings_button.clicked.connect(self.open_settings)
         header.addWidget(settings_button)
@@ -628,10 +655,13 @@ class MainWindow(QMainWindow):
         add.clicked.connect(self.add_task)
         workspace_settings = QPushButton("设置")
         workspace_settings.clicked.connect(self.open_settings)
+        workspace_note_manager = QPushButton("便签管理")
+        workspace_note_manager.clicked.connect(self.open_note_manager)
         self.workspace_exit_button = QPushButton("退出全屏编辑")
         self.workspace_exit_button.clicked.connect(self.exit_workspace)
         header_layout.addWidget(add)
         header_layout.addWidget(workspace_settings)
+        header_layout.addWidget(workspace_note_manager)
         header_layout.addWidget(self.workspace_exit_button)
         outer.addWidget(header)
 
@@ -767,6 +797,9 @@ class MainWindow(QMainWindow):
         float_action = QAction("显示 / 关闭桌面浮窗", self)
         float_action.triggered.connect(self.toggle_float)
         menu.addAction(float_action)
+        note_action = QAction("显示 / 隐藏桌边便签", self)
+        note_action.triggered.connect(self.toggle_desktop_note)
+        menu.addAction(note_action)
         menu.addSeparator()
         quit_action = QAction("退出", self)
         quit_action.triggered.connect(self.quit_app)
@@ -895,6 +928,10 @@ class MainWindow(QMainWindow):
             ),
         )
 
+    def _step_summary_for(self, task) -> tuple[int, int]:
+        """Cards only need a tiny progress hint; full rows stay in the editor."""
+        return self.db.step_summaries([int(task["id"])]).get(int(task["id"]), (0, 0))
+
     def _apply_workspace_selection(self) -> None:
         for task_id, card in self._workspace_cards.items():
             card.set_selected(task_id == self.workspace_selected_task_id)
@@ -945,6 +982,8 @@ class MainWindow(QMainWindow):
                     on_select=self.select_workspace_task,
                     selected=task["id"] == self.workspace_selected_task_id,
                     workspace_mode=True,
+                    step_summary=self._step_summary_for(task),
+                    on_move_today=self.move_task_to_today if self._workspace_scope == "previous" else None,
                 )
                 self.workspace_list_layout.addWidget(card)
                 self._workspace_cards[int(task["id"])] = card
@@ -971,7 +1010,7 @@ class MainWindow(QMainWindow):
         if current is None:
             return
         self.workspace_selected_task_id = task_id
-        self.workspace_editor.load_task(current)
+        self.workspace_editor.load_task(current, self.db.task_steps(task_id))
         self._apply_workspace_selection()
 
     def save_workspace_task(self, task_id: int, values: dict) -> None:
@@ -981,11 +1020,13 @@ class MainWindow(QMainWindow):
             self.workspace_editor.clear()
             self._render_workspace()
             return
+        steps = values.pop("steps", [])
         self.db.update_task(task_id, **values)
+        self.db.replace_task_steps(task_id, steps)
         self._skip_historical_alerts_if_needed(task_id, values)
         self._sync_windows_reminders()
         updated = self.db.task_by_id(task_id)
-        self.workspace_editor.mark_saved(updated)
+        self.workspace_editor.mark_saved(updated, self.db.task_steps(task_id))
         self._render_workspace()
 
     @staticmethod
@@ -1115,7 +1156,7 @@ class MainWindow(QMainWindow):
             section_title = "今日事项" if active_tab == 0 else f"{selected_day} · 未完成"
             self.list_layout.addWidget(self.section_label(section_title))
             for task in normal:
-                self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task))
+                self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task)))
         else:
             empty_text = "今天还没有事项。点击右上角“添加事项”开始安排。" if active_tab == 0 else "这一天没有未完成事项。"
             empty = QLabel(empty_text)
@@ -1126,7 +1167,7 @@ class MainWindow(QMainWindow):
             fixed_label.setFixedHeight(16)
             self.list_layout.addWidget(fixed_label)
             for task in fixed:
-                self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task))
+                self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task)))
         if active_tab == 0:
             tomorrow = (now + timedelta(days=1)).date().isoformat()
             tomorrow_tasks = self.db.tasks_for(tomorrow)
@@ -1145,7 +1186,7 @@ class MainWindow(QMainWindow):
                 preview_layout.addWidget(self.section_label("明日预览（继续向下滚动查看）", 5))
                 for task in preview:
                     preview_layout.addWidget(
-                        TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, preview=True)
+                        TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, preview=True, step_summary=self._step_summary_for(task))
                     )
                 self.list_layout.addWidget(preview_host)
         self.list_layout.addStretch(1)
@@ -1162,7 +1203,7 @@ class MainWindow(QMainWindow):
             if task["task_date"] != current_date:
                 current_date = task["task_date"]
                 self.list_layout.addWidget(self.section_label(f"{current_date} · 未完成"))
-            self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task))
+            self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task)))
 
     def _render_all_tasks(self, tasks) -> None:
         if not tasks:
@@ -1175,7 +1216,7 @@ class MainWindow(QMainWindow):
             if task["task_date"] != current_date:
                 current_date = task["task_date"]
                 self.list_layout.addWidget(self.section_label(f"{current_date} · 全部事项"))
-            self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task))
+            self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task)))
 
     @staticmethod
     def _is_past_due(values: dict) -> bool:
@@ -1200,19 +1241,27 @@ class MainWindow(QMainWindow):
         dialog = TaskDialog(parent=self)
         if self._run_passive_float_dialog(dialog) == QDialog.DialogCode.Accepted:
             values = dialog.values()
+            steps = values.pop("steps", [])
             task_id = self.db.add_task(**values)
+            self.db.replace_task_steps(task_id, steps)
             self._skip_historical_alerts_if_needed(task_id, values)
             self._sync_windows_reminders()
             self.render()
 
     def edit_task(self, task) -> None:
-        dialog = TaskDialog(task, self)
+        dialog = TaskDialog(task, self, task_steps=self.db.task_steps(int(task["id"])))
         if self._run_passive_float_dialog(dialog) == QDialog.DialogCode.Accepted:
             values = dialog.values()
+            steps = values.pop("steps", [])
             if dialog.duplicate_requested():
                 task_id = self.db.add_task(**values)
+                # A copied card is new work, so its execution steps begin unchecked.
+                self.db.replace_task_steps(task_id, [
+                    {"content": step["content"], "is_completed": False} for step in steps
+                ])
             else:
                 self.db.update_task(task["id"], **values)
+                self.db.replace_task_steps(task["id"], steps)
                 task_id = task["id"]
             self._skip_historical_alerts_if_needed(task_id, values)
             self._sync_windows_reminders()
@@ -1221,7 +1270,7 @@ class MainWindow(QMainWindow):
                 and task_id == self.workspace_selected_task_id
                 and not self.workspace_editor.is_dirty()
             ):
-                self.workspace_editor.mark_saved(self.db.task_by_id(task_id))
+                self.workspace_editor.mark_saved(self.db.task_by_id(task_id), self.db.task_steps(task_id))
             self.render()
 
     def set_completed(self, task_id: int, completed: bool) -> None:
@@ -1229,6 +1278,21 @@ class MainWindow(QMainWindow):
         if completed:
             self.important_reminder.remove_task(task_id)
         self._sync_windows_reminders()
+        self.render()
+
+    def move_task_to_today(self, task) -> None:
+        """A single, explicit carry-forward action for the previous-work view."""
+        task_id = int(task["id"])
+        today = self.db.today()
+        self.db.update_task(task_id, task_date=today)
+        self._skip_historical_alerts_if_needed(task_id, {
+            "task_date": today, "due_time": task["due_time"],
+            "windows_reminder_enabled": bool(task["windows_reminder_enabled"]),
+        })
+        self._sync_windows_reminders()
+        self.show_notice("已移到今天：这是原事项改期，不会新建副本。")
+        if self.workspace_selected_task_id == task_id:
+            self.workspace_editor.load_task(self.db.task_by_id(task_id), self.db.task_steps(task_id))
         self.render()
 
     def delete_task(self, task) -> None:
@@ -1255,6 +1319,11 @@ class MainWindow(QMainWindow):
     def dismiss_important_reminder(self, task_id: int) -> None:
         """Dismiss the reminder only; the underlying task remains unfinished."""
         self.db.acknowledge_important_reminder(task_id)
+        self._refresh_important_reminders()
+
+    def snooze_important_reminder(self, task_id: int, minutes: int) -> None:
+        """Delay the persistent app reminder without touching the task schedule."""
+        self.db.snooze_important_reminder(task_id, minutes)
         self._refresh_important_reminders()
 
     def open_float_menu(self, task) -> None:
@@ -1386,6 +1455,76 @@ class MainWindow(QMainWindow):
 
     def save_float_position(self, y: int) -> None:
         self.db.set_setting("float_dock_y", str(y))
+
+    def _desktop_note_state(self) -> dict:
+        return {
+            "text": self.db.get_setting("desktop_note_text", ""),
+            "color": self.db.get_setting("desktop_note_color", "warm_yellow"),
+            "fold_long_content": self.db.get_setting("desktop_note_fold", "1") == "1",
+        }
+
+    def _desktop_note_visible(self) -> bool:
+        return self.db.get_setting("desktop_note_visible", "0") == "1"
+
+    def restore_desktop_note(self) -> None:
+        """Restore the single user-created note without making new users see one."""
+        self.desktop_note.set_note(**self._desktop_note_state())
+        try:
+            width = max(self.desktop_note.minimumWidth(), int(self.db.get_setting("desktop_note_width", "270")))
+            height = max(self.desktop_note.minimumHeight(), int(self.db.get_setting("desktop_note_height", "220")))
+        except ValueError:
+            width, height = 270, 220
+        self.desktop_note.resize(width, height)
+        screen = QApplication.primaryScreen()
+        area = screen.availableGeometry() if screen else self.geometry()
+        try:
+            x = int(self.db.get_setting("desktop_note_x", str(area.left() + 48)))
+            y = int(self.db.get_setting("desktop_note_y", str(area.top() + 110)))
+        except ValueError:
+            x, y = area.left() + 48, area.top() + 110
+        x = max(area.left(), min(x, area.right() - self.desktop_note.width()))
+        y = max(area.top(), min(y, area.bottom() - self.desktop_note.height()))
+        self.desktop_note.move(x, y)
+        if self._desktop_note_visible():
+            self.desktop_note.show()
+
+    def save_desktop_note_content(self, text: str) -> None:
+        self.db.set_setting("desktop_note_text", text)
+
+    def save_desktop_note_layout(self) -> None:
+        self.db.set_setting("desktop_note_x", str(self.desktop_note.x()))
+        self.db.set_setting("desktop_note_y", str(self.desktop_note.y()))
+        self.db.set_setting("desktop_note_width", str(self.desktop_note.width()))
+        self.db.set_setting("desktop_note_height", str(self.desktop_note.height()))
+
+    def hide_desktop_note(self) -> None:
+        self.db.set_setting("desktop_note_visible", "0")
+        self.desktop_note.hide()
+
+    def open_note_manager(self) -> None:
+        dialog = DesktopNoteDialog(self._desktop_note_state(), self._desktop_note_visible(), self)
+        if self._run_passive_float_dialog(dialog) != QDialog.DialogCode.Accepted:
+            return
+        values = dialog.values()
+        self.db.set_setting("desktop_note_text", values["text"])
+        self.db.set_setting("desktop_note_color", values["color"])
+        self.db.set_setting("desktop_note_fold", "1" if values["fold_long_content"] else "0")
+        self.db.set_setting("desktop_note_visible", "1" if values["visible"] else "0")
+        self.desktop_note.set_note(values["text"], values["color"], values["fold_long_content"])
+        if values["visible"]:
+            if not self.desktop_note.isVisible():
+                self.restore_desktop_note()
+            self.desktop_note.show()
+            self.desktop_note.raise_()
+        else:
+            self.desktop_note.hide()
+
+    def toggle_desktop_note(self) -> None:
+        if self._desktop_note_visible():
+            self.hide_desktop_note()
+        else:
+            self.db.set_setting("desktop_note_visible", "1")
+            self.restore_desktop_note()
 
     def set_hotkey_manager(self, manager) -> None:
         self.hotkey_manager = manager
@@ -1566,10 +1705,12 @@ class MainWindow(QMainWindow):
         """
         dialog.setWindowModality(Qt.WindowModality.WindowModal)
         self.float_window.set_passive_mode(True)
+        self.desktop_note.setEnabled(False)
         try:
             return dialog.exec()
         finally:
             self.float_window.set_passive_mode(False)
+            self.desktop_note.setEnabled(True)
 
     def open_settings(self) -> None:
         try:
@@ -1651,6 +1792,7 @@ class MainWindow(QMainWindow):
 
     def quit_app(self) -> None:
         self.float_window.hide()
+        self.desktop_note.hide()
         self.important_reminder.hide()
         self.tray.hide()
         self.db.close()

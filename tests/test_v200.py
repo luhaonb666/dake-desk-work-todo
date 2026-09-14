@@ -1,4 +1,4 @@
-"""Focused V4.3.1 regression checks for settings, reminders, and task views."""
+"""Focused V4.5 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from ui.float_window import FloatCard, FloatWindow
 from ui.controls import CompactDatePicker, normalize_note_text
 from ui.settings_dialog import GuidedTimeCombo, SettingsDialog
 from ui.task_dialog import PlainNotesEditor, TaskDialog
+from ui.task_steps import TaskStepsEditor
 from ui.workspace_editor import WorkspaceEditor
 
 
@@ -529,6 +530,29 @@ class V200Tests(unittest.TestCase):
             [task["id"] for task in self.db.pending_important_reminder_tasks(datetime(2026, 9, 1, 10, 11))],
             [important],
         )
+
+    def test_important_reminder_can_snooze_without_completing_task(self) -> None:
+        important = self.db.add_task("签合同", "等对方确认", "2026-09-01", "10:00", False, True)
+        now = datetime(2026, 9, 1, 10, 1)
+        self.db.snooze_important_reminder(important, 10, now)
+        self.assertEqual(self.db.pending_important_reminder_tasks(datetime(2026, 9, 1, 10, 10)), [])
+        self.assertEqual(
+            [task["id"] for task in self.db.pending_important_reminder_tasks(datetime(2026, 9, 1, 10, 11))],
+            [important],
+        )
+        self.assertEqual(self.db.task_by_id(important)["is_completed"], 0)
+
+    def test_task_steps_are_optional_and_keep_parent_completion_separate(self) -> None:
+        task_id = self.db.add_task("完成报价", "", "2026-09-01", None, False)
+        self.db.replace_task_steps(task_id, [
+            {"content": "核价", "is_completed": True},
+            {"content": "盖章", "is_completed": True},
+        ])
+        self.assertEqual(self.db.step_summaries([task_id]), {task_id: (2, 2)})
+        self.assertEqual(self.db.task_by_id(task_id)["is_completed"], 0)
+        editor = TaskStepsEditor()
+        editor.set_steps(self.db.task_steps(task_id))
+        self.assertIn("如整条事项也完成", editor.guide.text())
 
     def test_unchanged_time_does_not_rearm_a_reminder(self) -> None:
         task_id = self.db.add_task("重要会议", "初稿", "2026-09-01", "10:00", False)

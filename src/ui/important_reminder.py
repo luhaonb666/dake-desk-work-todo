@@ -10,6 +10,7 @@ class ImportantReminderWindow(QWidget):
     """Stay visible at the lower-right until each important item is dismissed."""
 
     dismissed = pyqtSignal(int)
+    snoozed = pyqtSignal(int, int)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -68,9 +69,23 @@ class ImportantReminderWindow(QWidget):
         divider.setFrameShape(QFrame.Shape.HLine)
         divider.setStyleSheet("color:#efd9ad; border:none; background:#efd9ad; max-height:1px;")
         layout.addWidget(divider)
-        hint = QLabel("此提醒会保留到你看见它；关闭提醒不会完成待办。")
+        hint = QLabel("暂时没空可稍后提醒；关闭提醒不会完成待办。")
         hint.setStyleSheet("font-size:11px; color:#9b7a42; background:transparent; border:none;")
         layout.addWidget(hint)
+        snooze_row = QHBoxLayout()
+        snooze_row.setContentsMargins(0, 0, 0, 0)
+        snooze_row.setSpacing(7)
+        for minutes in (10, 30):
+            button = QPushButton(f"{minutes} 分钟后提醒")
+            button.setToolTip("届时会再次显示这条软件内置顶提醒。")
+            button.setStyleSheet(
+                "QPushButton { background:#fffdf8; border:1px solid #d9b979; border-radius:9px; color:#8a5600; padding:7px 9px; }"
+                "QPushButton:hover { background:#fff0cd; }"
+            )
+            button.clicked.connect(lambda _=False, value=minutes: self._snooze_current(value))
+            snooze_row.addWidget(button)
+        snooze_row.addStretch()
+        layout.addLayout(snooze_row)
         self.dismiss_button = QPushButton("关闭提醒")
         self.dismiss_button.setStyleSheet(
             "QPushButton { background:#d48a0b; border:none; border-radius:9px; color:white; font-weight:600; padding:8px 14px; }"
@@ -102,6 +117,10 @@ class ImportantReminderWindow(QWidget):
     def _dismiss_current(self) -> None:
         if self._current_id is not None:
             self.dismissed.emit(self._current_id)
+
+    def _snooze_current(self, minutes: int) -> None:
+        if self._current_id is not None:
+            self.snoozed.emit(self._current_id, minutes)
 
     def _refresh(self) -> None:
         if self._current_id is None:
