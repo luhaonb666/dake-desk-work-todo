@@ -31,7 +31,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.5.1"
+APP_VERSION = "4.5.2"
 
 
 def app_icon() -> QIcon:
@@ -183,8 +183,7 @@ class TaskCard(QFrame):
             if task["is_completed"] else "font-size:15px; font-weight:500; color:#26313e;"
         )
         content.addWidget(title)
-        content_mode = task["content_mode"] if "content_mode" in task.keys() else "notes"
-        if task["notes"] and content_mode != "steps":
+        if task["notes"]:
             notes = ExpandableNotesWidget(
                 task["notes"],
                 max_visible_lines=8 if workspace_mode else ExpandableNotesWidget.MAX_VISIBLE_LINES,
@@ -197,7 +196,7 @@ class TaskCard(QFrame):
                 notes.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             content.addWidget(notes)
         completed_steps, total_steps = step_summary
-        if total_steps and content_mode == "steps":
+        if total_steps:
             progress = QLabel(
                 "待办步骤已完成 · 可勾选事项" if completed_steps == total_steps
                 else f"待办步骤 {completed_steps}/{total_steps}"

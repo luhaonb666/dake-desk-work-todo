@@ -50,7 +50,14 @@ class DesktopNoteWindow(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(10, 9, 10, 9)
         outer.setSpacing(7)
-        header = QHBoxLayout()
+        # The entire blank part of the top bar is a drag handle.  The older
+        # version only listened on the few pixels occupied by the title text,
+        # which made the note look as though it could not be moved.
+        self.drag_handle = QWidget()
+        self.drag_handle.setToolTip("拖动此处可移动便签")
+        self.drag_handle.setCursor(Qt.CursorShape.SizeAllCursor)
+        self.drag_handle.installEventFilter(self)
+        header = QHBoxLayout(self.drag_handle)
         header.setContentsMargins(0, 0, 0, 0)
         self.drag_label = QLabel("桌边便签")
         self.drag_label.setToolTip("拖动此处可移动便签")
@@ -66,7 +73,7 @@ class DesktopNoteWindow(QWidget):
         self.done_button.clicked.connect(self.finish_editing)
         header.addWidget(self.edit_button)
         header.addWidget(self.done_button)
-        outer.addLayout(header)
+        outer.addWidget(self.drag_handle)
 
         self.view = QLabel()
         self.view.setTextFormat(Qt.TextFormat.PlainText)
@@ -165,7 +172,7 @@ class DesktopNoteWindow(QWidget):
         )
 
     def eventFilter(self, watched, event):  # noqa: N802
-        if watched is self.drag_label:
+        if watched in (getattr(self, "drag_label", None), getattr(self, "drag_handle", None)):
             if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 self._drag_start = event.globalPosition().toPoint()
                 return True
@@ -207,7 +214,7 @@ class DesktopNoteDialog(QDialog):
 
     def __init__(self, state: dict, visible: bool, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("桌边便签")
+        self.setWindowTitle("桌边便签管理")
         self.setMinimumSize(440, 380)
         self.setStyleSheet(APP_STYLE + "QDialog { background:#f7f9fc; }")
         outer = QVBoxLayout(self)
@@ -235,7 +242,9 @@ class DesktopNoteDialog(QDialog):
         self.fold = QCheckBox("长内容折叠显示（超过 8 行时显示摘要）")
         self.fold.setChecked(bool(state.get("fold_long_content", True)))
         outer.addWidget(self.fold)
-        help_text = QLabel("桌面上点“编辑与调整”后，可拖动顶部移动，拖动右下角调整大小。")
+        help_text = QLabel(
+            "桌面操作：点“编辑与调整”后，拖动整个顶部栏可移动；右下角出现“↘ 拖动调整大小”，可直接改变宽高。"
+        )
         help_text.setWordWrap(True)
         help_text.setStyleSheet("font-size:11px; color:#8793a2;")
         outer.addWidget(help_text)

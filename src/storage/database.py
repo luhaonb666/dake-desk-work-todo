@@ -125,9 +125,9 @@ class Database:
                 self.connection.execute(
                     "ALTER TABLE tasks ADD COLUMN content_mode TEXT NOT NULL DEFAULT 'notes'"
                 )
-            # V4.5 already let a few users add steps beside notes.  In V4.5.1
-            # steps are the task's detailed content, so expose those rows in
-            # step mode without deleting the old text from the database.
+            # V4.5 already let a few users add steps beside notes. Preserve
+            # that data through the temporary content-mode migration; V4.5.2
+            # presents notes and steps together again.
             self.connection.execute(
                 "UPDATE tasks SET content_mode = 'steps' "
                 "WHERE id IN (SELECT DISTINCT task_id FROM task_steps)"

@@ -1,4 +1,4 @@
-"""Focused V4.5.1 regression checks for settings, reminders, and task views."""
+"""Focused V4.5.2 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -555,34 +555,34 @@ class V200Tests(unittest.TestCase):
         editor.set_steps(self.db.task_steps(task_id))
         self.assertIn("如整条事项也完成", editor.guide.text())
 
-    def test_v451_step_button_ignores_qt_checked_argument(self) -> None:
+    def test_v452_step_button_creates_the_first_multiline_step_immediately(self) -> None:
         editor = TaskStepsEditor()
-        editor.add_button.click()
+        editor.start_button.click()
         self.assertEqual(len(editor._rows()), 1)
-        self.assertEqual(editor._rows()[0].edit.text(), "")
+        self.assertEqual(editor._rows()[0].edit.toPlainText(), "")
+        editor._rows()[0].edit.setPlainText("核价\n确认折扣")
+        self.assertEqual(editor.values()[0]["content"], "核价\n确认折扣")
 
-    def test_v451_detailed_content_is_one_visible_mode_at_a_time(self) -> None:
+    def test_v452_steps_and_notes_are_parallel_and_notes_import_as_steps(self) -> None:
         dialog = TaskDialog()
         dialog.notes_edit.setPlainText("核价\n盖章\n发送")
-        dialog.content_mode_button.click()
-        self.assertEqual(dialog.values()["content_mode"], "steps")
-        self.assertTrue(dialog.notes_edit.isHidden())
-        self.assertFalse(dialog.steps_editor.isHidden())
+        dialog.steps_editor.start_button.click()
+        self.assertFalse(dialog.notes_edit.isHidden())
+        self.assertFalse(dialog.steps_editor.panel.isHidden())
+        self.assertEqual(len(dialog.steps_editor._rows()), 1)
+        dialog.import_steps_button.click()
         self.assertEqual(
             [step["content"] for step in dialog.values()["steps"]], ["核价", "盖章", "发送"]
         )
-        dialog.content_mode_button.click()
-        self.assertEqual(dialog.values()["content_mode"], "notes")
-        self.assertFalse(dialog.notes_edit.isHidden())
-        self.assertTrue(dialog.steps_editor.isHidden())
         self.assertEqual(dialog.values()["notes"], "核价\n盖章\n发送")
 
-    def test_v451_desktop_note_construction_handles_early_qt_events(self) -> None:
+    def test_v452_desktop_note_construction_handles_early_qt_events(self) -> None:
         note = DesktopNoteWindow()
         self.assertIsNotNone(note.resize_hint)
+        self.assertIsNotNone(note.drag_handle)
         note.deleteLater()
 
-    def test_v451_content_mode_persists_with_the_task(self) -> None:
+    def test_v452_content_mode_preserves_compatibility_for_existing_tasks(self) -> None:
         task_id = self.db.add_task(
             "完成报价", "", "2026-09-01", None, False, content_mode="steps"
         )

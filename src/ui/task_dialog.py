@@ -79,10 +79,7 @@ class TaskDialog(QDialog):
     def __init__(self, task=None, parent=None, *, task_steps=None) -> None:
         super().__init__(parent)
         self.task = task
-        self._content_mode = (
-            task["content_mode"] if task and "content_mode" in task.keys() and task["content_mode"] == "steps"
-            else "notes"
-        )
+        self._last_imported_note_text: str | None = None
         self.setObjectName("taskDialog")
         self.setWindowTitle("编辑事项" if task else "添加事项")
         self.setMinimumWidth(470)
@@ -108,17 +105,14 @@ class TaskDialog(QDialog):
         self.notes_edit.setPlaceholderText("可填写具体内容、材料或下一步")
         self.notes_edit.setFixedHeight(100)
         self.notes_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.title_edit.next_field_requested.connect(self._focus_content)
+        self.title_edit.next_field_requested.connect(self.notes_edit.setFocus)
         self.steps_editor = TaskStepsEditor()
         self.steps_editor.set_steps(task_steps)
-        self.content_mode_button = QPushButton()
-        self.content_mode_button.setObjectName("contentModeToggle")
-        self.content_mode_button.clicked.connect(self._toggle_content_mode)
-        self.content_mode_button.setStyleSheet(
-            "QPushButton#contentModeToggle { text-align:left; color:#587298; background:#f7faff; "
-            "border:1px dashed #abc0df; border-radius:8px; padding:6px 9px; font-weight:600; }"
-            "QPushButton#contentModeToggle:hover { background:#eef5ff; border-color:#7399d4; }"
-        )
+        self.import_steps_button = QPushButton("将具体内容按换行添加为步骤")
+        self.import_steps_button.setObjectName("quietButton")
+        self.import_steps_button.setToolTip("每个非空行会新增为一个待办步骤；上方具体内容会保留。")
+        self.import_steps_button.clicked.connect(self._import_note_lines)
+        self.notes_edit.textChanged.connect(self._refresh_import_button)
 
         self.date_edit = CompactDatePicker()
         selected = QDate.fromString(task["task_date"], "yyyy-MM-dd") if task else QDate.currentDate()
@@ -197,14 +191,10 @@ class TaskDialog(QDialog):
         self.duplicate_hint.setWordWrap(True)
         self.duplicate_hint.setStyleSheet("font-size:11px; color:#8793a2; padding-left:4px;")
         self.duplicate_hint.setVisible(bool(task))
-        content_box = QVBoxLayout()
-        content_box.setContentsMargins(0, 0, 0, 0)
-        content_box.setSpacing(6)
-        content_box.addWidget(self.content_mode_button)
-        content_box.addWidget(self.notes_edit)
-        content_box.addWidget(self.steps_editor)
         form.addRow("事项标题", title_box)
-        form.addRow("具体内容", content_box)
+        form.addRow("", self.steps_editor)
+        form.addRow("具体内容", self.notes_edit)
+        form.addRow("", self.import_steps_button)
         form.addRow("日期", self.date_edit)
         form.addRow("时间", time_box)
         form.addRow("", self.fixed_check)
@@ -227,28 +217,25 @@ class TaskDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         QShortcut(QKeySequence("Ctrl+S"), self, activated=self.accept)
-        self._refresh_content_mode()
+        self._refresh_import_button()
 
-    def _focus_content(self) -> None:
-        (self.steps_editor if self._content_mode == "steps" else self.notes_edit).setFocus()
+    def _import_note_lines(self) -> None:
+        text = self.notes_edit.toPlainText()
+        imported = self.steps_editor.import_note_lines(text)
+        if imported:
+            self._last_imported_note_text = text
+            self.import_steps_button.setText(f"已按换行添加 {imported} 个步骤")
+            self._refresh_import_button()
 
-    def _toggle_content_mode(self) -> None:
-        self._content_mode = "steps" if self._content_mode == "notes" else "notes"
-        if self._content_mode == "steps" and not self.steps_editor.values():
-            imported = [line.strip() for line in self.notes_edit.toPlainText().splitlines() if line.strip()]
-            if imported:
-                self.steps_editor.set_steps([{"content": line, "is_completed": False} for line in imported])
-        self._refresh_content_mode()
-
-    def _refresh_content_mode(self) -> None:
-        steps_mode = self._content_mode == "steps"
-        self.notes_edit.setVisible(not steps_mode)
-        self.steps_editor.setVisible(steps_mode)
-        self.content_mode_button.setText("← 改用普通文本" if steps_mode else "＋ 改用分项步骤")
-        self.content_mode_button.setToolTip(
-            "分项步骤会作为这条事项的具体内容；切换回来不会删除已写的文字。"
-            if steps_mode else "将具体内容改成可逐项勾选的分项步骤。已有多行文字会按行导入步骤。"
-        )
+    def _refresh_import_button(self) -> None:
+        text = self.notes_edit.toPlainText()
+        has_lines = bool([line for line in text.splitlines() if line.strip()])
+        already_imported = text == self._last_imported_note_text
+        self.import_steps_button.setEnabled(has_lines and not already_imported)
+        if not has_lines:
+            self.import_steps_button.setText("将具体内容按换行添加为步骤")
+        elif already_imported:
+            self.import_steps_button.setText("已按换行添加为步骤（修改内容后可再次导入）")
 
     def values(self) -> dict:
         due_time = None
@@ -262,7 +249,7 @@ class TaskDialog(QDialog):
             "is_fixed": self.fixed_check.isChecked(),
             "windows_reminder_enabled": bool(due_time) and self.windows_reminder_check.isChecked(),
             "steps": self.steps_editor.values(),
-            "content_mode": self._content_mode,
+            "content_mode": "notes",
         }
 
     def _sync_windows_reminder_availability(self, enabled: bool) -> None:
