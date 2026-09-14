@@ -51,16 +51,16 @@ class TaskStepsEditor(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(5)
         heading = QHBoxLayout()
-        title = QLabel("待办步骤（可选）")
+        title = QLabel("分项步骤")
         title.setStyleSheet("font-size:13px; color:#536273; font-weight:600;")
         heading.addWidget(title)
         heading.addStretch()
-        self.add_button = QPushButton("＋ 添加步骤")
+        self.add_button = QPushButton("＋ 添加分项步骤")
         self.add_button.setObjectName("quietButton")
         self.add_button.setToolTip("把复杂事项拆成几步，例如“核价、盖章、发送”。")
         heading.addWidget(self.add_button)
         outer.addLayout(heading)
-        self.guide = QLabel("把复杂事项拆成可勾选的小步骤；所有步骤完成后，仍需勾选整条事项。")
+        self.guide = QLabel("把这条事项的具体内容拆成可勾选的小步骤；全部完成后，仍需勾选整条事项。")
         self.guide.setWordWrap(True)
         self.guide.setStyleSheet("font-size:11px; color:#8793a2; padding:0 2px;")
         outer.addWidget(self.guide)
@@ -69,7 +69,9 @@ class TaskStepsEditor(QWidget):
         self.rows.setContentsMargins(0, 0, 0, 0)
         self.rows.setSpacing(4)
         outer.addWidget(self.rows_host)
-        self.add_button.clicked.connect(self.add_row)
+        # QPushButton.clicked carries a ``checked`` bool.  Do not pass it as
+        # the row's text: on some Qt builds that turns into QLineEdit(False).
+        self.add_button.clicked.connect(lambda _checked=False: self.add_row())
 
     def _rows(self) -> list[_StepRow]:
         return [self.rows.itemAt(index).widget() for index in range(self.rows.count()) if isinstance(self.rows.itemAt(index).widget(), _StepRow)]
@@ -111,11 +113,11 @@ class TaskStepsEditor(QWidget):
     def _refresh_guide(self) -> None:
         values = self.values()
         if values and all(step["is_completed"] for step in values):
-            self.guide.setText("所有待办步骤已完成；如整条事项也完成，请勾选事项左侧方框。")
+            self.guide.setText("所有分项步骤已完成；如整条事项也完成，请勾选事项左侧方框。")
             self.guide.setStyleSheet("font-size:11px; color:#9a6d24; font-weight:600; padding:0 2px;")
         elif values:
             self.guide.setText("勾选步骤只记录进度；整条事项仍由你决定何时完成。")
             self.guide.setStyleSheet("font-size:11px; color:#8793a2; padding:0 2px;")
         else:
-            self.guide.setText("把复杂事项拆成可勾选的小步骤；所有步骤完成后，仍需勾选整条事项。")
+            self.guide.setText("把这条事项的具体内容拆成可勾选的小步骤；全部完成后，仍需勾选整条事项。")
             self.guide.setStyleSheet("font-size:11px; color:#8793a2; padding:0 2px;")

@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPlainTextEdit,
+    QPushButton,
     QSizePolicy,
     QTextEdit,
     QVBoxLayout,
@@ -78,6 +79,10 @@ class TaskDialog(QDialog):
     def __init__(self, task=None, parent=None, *, task_steps=None) -> None:
         super().__init__(parent)
         self.task = task
+        self._content_mode = (
+            task["content_mode"] if task and "content_mode" in task.keys() and task["content_mode"] == "steps"
+            else "notes"
+        )
         self.setObjectName("taskDialog")
         self.setWindowTitle("编辑事项" if task else "添加事项")
         self.setMinimumWidth(470)
@@ -103,9 +108,17 @@ class TaskDialog(QDialog):
         self.notes_edit.setPlaceholderText("可填写具体内容、材料或下一步")
         self.notes_edit.setFixedHeight(100)
         self.notes_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.title_edit.next_field_requested.connect(self.notes_edit.setFocus)
+        self.title_edit.next_field_requested.connect(self._focus_content)
         self.steps_editor = TaskStepsEditor()
         self.steps_editor.set_steps(task_steps)
+        self.content_mode_button = QPushButton()
+        self.content_mode_button.setObjectName("contentModeToggle")
+        self.content_mode_button.clicked.connect(self._toggle_content_mode)
+        self.content_mode_button.setStyleSheet(
+            "QPushButton#contentModeToggle { text-align:left; color:#587298; background:#f7faff; "
+            "border:1px dashed #abc0df; border-radius:8px; padding:6px 9px; font-weight:600; }"
+            "QPushButton#contentModeToggle:hover { background:#eef5ff; border-color:#7399d4; }"
+        )
 
         self.date_edit = CompactDatePicker()
         selected = QDate.fromString(task["task_date"], "yyyy-MM-dd") if task else QDate.currentDate()
@@ -184,9 +197,14 @@ class TaskDialog(QDialog):
         self.duplicate_hint.setWordWrap(True)
         self.duplicate_hint.setStyleSheet("font-size:11px; color:#8793a2; padding-left:4px;")
         self.duplicate_hint.setVisible(bool(task))
+        content_box = QVBoxLayout()
+        content_box.setContentsMargins(0, 0, 0, 0)
+        content_box.setSpacing(6)
+        content_box.addWidget(self.content_mode_button)
+        content_box.addWidget(self.notes_edit)
+        content_box.addWidget(self.steps_editor)
         form.addRow("事项标题", title_box)
-        form.addRow("具体内容", self.notes_edit)
-        form.addRow("", self.steps_editor)
+        form.addRow("具体内容", content_box)
         form.addRow("日期", self.date_edit)
         form.addRow("时间", time_box)
         form.addRow("", self.fixed_check)
@@ -209,6 +227,28 @@ class TaskDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         QShortcut(QKeySequence("Ctrl+S"), self, activated=self.accept)
+        self._refresh_content_mode()
+
+    def _focus_content(self) -> None:
+        (self.steps_editor if self._content_mode == "steps" else self.notes_edit).setFocus()
+
+    def _toggle_content_mode(self) -> None:
+        self._content_mode = "steps" if self._content_mode == "notes" else "notes"
+        if self._content_mode == "steps" and not self.steps_editor.values():
+            imported = [line.strip() for line in self.notes_edit.toPlainText().splitlines() if line.strip()]
+            if imported:
+                self.steps_editor.set_steps([{"content": line, "is_completed": False} for line in imported])
+        self._refresh_content_mode()
+
+    def _refresh_content_mode(self) -> None:
+        steps_mode = self._content_mode == "steps"
+        self.notes_edit.setVisible(not steps_mode)
+        self.steps_editor.setVisible(steps_mode)
+        self.content_mode_button.setText("← 改用普通文本" if steps_mode else "＋ 改用分项步骤")
+        self.content_mode_button.setToolTip(
+            "分项步骤会作为这条事项的具体内容；切换回来不会删除已写的文字。"
+            if steps_mode else "将具体内容改成可逐项勾选的分项步骤。已有多行文字会按行导入步骤。"
+        )
 
     def values(self) -> dict:
         due_time = None
@@ -222,6 +262,7 @@ class TaskDialog(QDialog):
             "is_fixed": self.fixed_check.isChecked(),
             "windows_reminder_enabled": bool(due_time) and self.windows_reminder_check.isChecked(),
             "steps": self.steps_editor.values(),
+            "content_mode": self._content_mode,
         }
 
     def _sync_windows_reminder_availability(self, enabled: bool) -> None:

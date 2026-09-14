@@ -31,7 +31,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.5"
+APP_VERSION = "4.5.1"
 
 
 def app_icon() -> QIcon:
@@ -183,7 +183,8 @@ class TaskCard(QFrame):
             if task["is_completed"] else "font-size:15px; font-weight:500; color:#26313e;"
         )
         content.addWidget(title)
-        if task["notes"]:
+        content_mode = task["content_mode"] if "content_mode" in task.keys() else "notes"
+        if task["notes"] and content_mode != "steps":
             notes = ExpandableNotesWidget(
                 task["notes"],
                 max_visible_lines=8 if workspace_mode else ExpandableNotesWidget.MAX_VISIBLE_LINES,
@@ -196,7 +197,7 @@ class TaskCard(QFrame):
                 notes.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             content.addWidget(notes)
         completed_steps, total_steps = step_summary
-        if total_steps:
+        if total_steps and content_mode == "steps":
             progress = QLabel(
                 "待办步骤已完成 · 可勾选事项" if completed_steps == total_steps
                 else f"待办步骤 {completed_steps}/{total_steps}"
@@ -747,6 +748,8 @@ class MainWindow(QMainWindow):
         self.workspace_editor_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.workspace_editor = WorkspaceEditor()
         self.workspace_editor.save_requested.connect(self.save_workspace_task)
+        self.workspace_editor.duplicate_requested.connect(self.duplicate_workspace_task)
+        self.workspace_editor.move_today_requested.connect(self.move_workspace_task_to_today)
         self.workspace_editor_scroll.setWidget(self.workspace_editor)
         right_layout.addWidget(self.workspace_editor_scroll, 1)
         self.workspace_action_bar = self.workspace_editor.detach_action_bar()
@@ -983,7 +986,7 @@ class MainWindow(QMainWindow):
                     selected=task["id"] == self.workspace_selected_task_id,
                     workspace_mode=True,
                     step_summary=self._step_summary_for(task),
-                    on_move_today=self.move_task_to_today if self._workspace_scope == "previous" else None,
+                    on_move_today=None,
                 )
                 self.workspace_list_layout.addWidget(card)
                 self._workspace_cards[int(task["id"])] = card
@@ -1028,6 +1031,34 @@ class MainWindow(QMainWindow):
         updated = self.db.task_by_id(task_id)
         self.workspace_editor.mark_saved(updated, self.db.task_steps(task_id))
         self._render_workspace()
+
+    def duplicate_workspace_task(self, task_id: int) -> None:
+        """Copy only a saved workspace item, so the action is never ambiguous."""
+        task = self.db.task_by_id(task_id)
+        if task is None:
+            return
+        copied_id = self.db.add_task(
+            title=task["title"],
+            notes=task["notes"],
+            task_date=task["task_date"],
+            due_time=task["due_time"],
+            is_fixed=bool(task["is_fixed"]),
+            windows_reminder_enabled=bool(task["windows_reminder_enabled"]),
+            content_mode=task["content_mode"] if "content_mode" in task.keys() else "notes",
+        )
+        self.db.replace_task_steps(copied_id, [
+            {"content": step["content"], "is_completed": False}
+            for step in self.db.task_steps(task_id)
+        ])
+        self.workspace_selected_task_id = copied_id
+        self.show_notice("已复制为新事项：原事项保留，副本可单独修改。")
+        self.render()
+
+    def move_workspace_task_to_today(self, task_id: int) -> None:
+        task = self.db.task_by_id(task_id)
+        if task is None or task["is_completed"] or task["task_date"] >= self.db.today():
+            return
+        self.move_task_to_today(task)
 
     @staticmethod
     def section_label(text: str, top_padding: int = 12) -> QLabel:

@@ -9,7 +9,7 @@ from typing import Any, Iterable
 
 
 class Database:
-    SCHEMA_VERSION = 6
+    SCHEMA_VERSION = 7
 
     def __init__(self, path: Path) -> None:
         self.connection = sqlite3.connect(path)
@@ -115,6 +115,24 @@ class Database:
                 """
             )
             version = 6
+        if version < 7:
+            columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(tasks)")}
+            if "content_mode" not in columns:
+                # A task has one primary form of detailed content: normal text
+                # or an ordered set of execution steps.  Keep historical text
+                # intact during the upgrade, even when an older V4.5 task had
+                # both fields filled while this distinction did not yet exist.
+                self.connection.execute(
+                    "ALTER TABLE tasks ADD COLUMN content_mode TEXT NOT NULL DEFAULT 'notes'"
+                )
+            # V4.5 already let a few users add steps beside notes.  In V4.5.1
+            # steps are the task's detailed content, so expose those rows in
+            # step mode without deleting the old text from the database.
+            self.connection.execute(
+                "UPDATE tasks SET content_mode = 'steps' "
+                "WHERE id IN (SELECT DISTINCT task_id FROM task_steps)"
+            )
+            version = 7
         self.connection.execute(
             "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)",
             (str(version),),
@@ -147,22 +165,29 @@ class Database:
         due_time: str | None,
         is_fixed: bool,
         windows_reminder_enabled: bool = False,
+        content_mode: str = "notes",
     ) -> int:
         now = datetime.now().isoformat(timespec="seconds")
         cursor = self.connection.execute(
             """INSERT INTO tasks(
-                   title, notes, task_date, due_time, is_fixed, windows_reminder_enabled, created_at, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (title, notes, task_date, due_time, int(is_fixed), int(windows_reminder_enabled), now, now),
+                   title, notes, task_date, due_time, is_fixed, windows_reminder_enabled, content_mode, created_at, updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                title, notes, task_date, due_time, int(is_fixed), int(windows_reminder_enabled),
+                "steps" if content_mode == "steps" else "notes", now, now,
+            ),
         )
         self.connection.commit()
         return int(cursor.lastrowid)
 
     def update_task(self, task_id: int, **fields: Any) -> None:
         allowed = {
-            "title", "notes", "task_date", "due_time", "is_fixed", "float_slot", "windows_reminder_enabled"
+            "title", "notes", "task_date", "due_time", "is_fixed", "float_slot", "windows_reminder_enabled",
+            "content_mode",
         }
         values = {key: value for key, value in fields.items() if key in allowed}
+        if "content_mode" in values:
+            values["content_mode"] = "steps" if values["content_mode"] == "steps" else "notes"
         if not values:
             return
         # A rescheduled task is a new reminder schedule. Do not clear alert

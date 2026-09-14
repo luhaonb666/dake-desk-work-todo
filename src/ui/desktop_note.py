@@ -178,7 +178,10 @@ class DesktopNoteWindow(QWidget):
                 self._drag_start = None
                 self.layout_changed.emit()
                 return True
-        if watched is self.resize_hint and self._editing:
+        # Qt can dispatch a child-polish event while this window is still
+        # constructing.  At that moment ``resize_hint`` is not guaranteed to
+        # exist yet, so a harmless event must not turn into a global exception.
+        if watched is getattr(self, "resize_hint", None) and self._editing:
             if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 self._resize_start = event.globalPosition().toPoint()
                 self._start_size = self.size()

@@ -1,4 +1,4 @@
-"""Focused V4.5 regression checks for settings, reminders, and task views."""
+"""Focused V4.5.1 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from services.windows_notifications import planned_reminders
 from ui.main_window import ExpandableNotesWidget, FadedPreviewLine, MainWindow
 from ui.float_window import FloatCard, FloatWindow
 from ui.controls import CompactDatePicker, normalize_note_text
+from ui.desktop_note import DesktopNoteWindow
 from ui.settings_dialog import GuidedTimeCombo, SettingsDialog
 from ui.task_dialog import PlainNotesEditor, TaskDialog
 from ui.task_steps import TaskStepsEditor
@@ -553,6 +554,41 @@ class V200Tests(unittest.TestCase):
         editor = TaskStepsEditor()
         editor.set_steps(self.db.task_steps(task_id))
         self.assertIn("如整条事项也完成", editor.guide.text())
+
+    def test_v451_step_button_ignores_qt_checked_argument(self) -> None:
+        editor = TaskStepsEditor()
+        editor.add_button.click()
+        self.assertEqual(len(editor._rows()), 1)
+        self.assertEqual(editor._rows()[0].edit.text(), "")
+
+    def test_v451_detailed_content_is_one_visible_mode_at_a_time(self) -> None:
+        dialog = TaskDialog()
+        dialog.notes_edit.setPlainText("核价\n盖章\n发送")
+        dialog.content_mode_button.click()
+        self.assertEqual(dialog.values()["content_mode"], "steps")
+        self.assertTrue(dialog.notes_edit.isHidden())
+        self.assertFalse(dialog.steps_editor.isHidden())
+        self.assertEqual(
+            [step["content"] for step in dialog.values()["steps"]], ["核价", "盖章", "发送"]
+        )
+        dialog.content_mode_button.click()
+        self.assertEqual(dialog.values()["content_mode"], "notes")
+        self.assertFalse(dialog.notes_edit.isHidden())
+        self.assertTrue(dialog.steps_editor.isHidden())
+        self.assertEqual(dialog.values()["notes"], "核价\n盖章\n发送")
+
+    def test_v451_desktop_note_construction_handles_early_qt_events(self) -> None:
+        note = DesktopNoteWindow()
+        self.assertIsNotNone(note.resize_hint)
+        note.deleteLater()
+
+    def test_v451_content_mode_persists_with_the_task(self) -> None:
+        task_id = self.db.add_task(
+            "完成报价", "", "2026-09-01", None, False, content_mode="steps"
+        )
+        self.assertEqual(self.db.task_by_id(task_id)["content_mode"], "steps")
+        self.db.update_task(task_id, content_mode="notes")
+        self.assertEqual(self.db.task_by_id(task_id)["content_mode"], "notes")
 
     def test_unchanged_time_does_not_rearm_a_reminder(self) -> None:
         task_id = self.db.add_task("重要会议", "初稿", "2026-09-01", "10:00", False)
