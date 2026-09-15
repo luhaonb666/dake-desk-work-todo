@@ -41,7 +41,10 @@ class DesktopNoteWindow(QWidget):
         self.setObjectName("desktopNoteWindow")
         self.setWindowTitle("大可桌边 · 桌边便签")
         self.setWindowFlags(
-            Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
+            # This is a desktop note, not a global float: normal application
+            # windows should cover it, while it remains present when returning
+            # to the desktop.
+            Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.setMinimumSize(210, 150)
@@ -69,10 +72,15 @@ class DesktopNoteWindow(QWidget):
         self.edit_button.setToolTip("编辑文字，并拖动右下角调整便签大小")
         self.done_button = QPushButton("完成")
         self.done_button.setVisible(False)
+        self.close_note_button = QPushButton("关闭便签")
+        self.close_note_button.setToolTip("隐藏便签，不删除内容；可在“便签管理”中再次显示。")
+        self.close_note_button.setVisible(False)
         self.edit_button.clicked.connect(self.enter_editing)
         self.done_button.clicked.connect(self.finish_editing)
         header.addWidget(self.edit_button)
         header.addWidget(self.done_button)
+        header.addWidget(self.close_note_button)
+        self.close_note_button.clicked.connect(self.hide_from_editing)
         outer.addWidget(self.drag_handle)
 
         self.view = QLabel()
@@ -128,6 +136,7 @@ class DesktopNoteWindow(QWidget):
         self.editor.setVisible(True)
         self.edit_button.setVisible(False)
         self.done_button.setVisible(True)
+        self.close_note_button.setVisible(True)
         self.resize_hint.setVisible(True)
         self.editor.setFocus()
 
@@ -138,11 +147,17 @@ class DesktopNoteWindow(QWidget):
         self.view.setVisible(True)
         self.edit_button.setVisible(True)
         self.done_button.setVisible(False)
+        self.close_note_button.setVisible(False)
         self.resize_hint.setVisible(False)
         self._expanded = False
         self._refresh_view()
         self.content_saved.emit(self._text)
         self.layout_changed.emit()
+
+    def hide_from_editing(self) -> None:
+        """Keep text typed in the current edit session, then hide only the note."""
+        self.finish_editing()
+        self.hide_requested.emit()
 
     def toggle_expanded(self) -> None:
         self._expanded = not self._expanded

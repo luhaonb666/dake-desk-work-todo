@@ -48,7 +48,7 @@ class WorkspaceEditor(QWidget):
         self.form_host = QWidget()
         form = QVBoxLayout(self.form_host)
         form.setContentsMargins(0, 0, 0, 0)
-        form.setSpacing(0)
+        form.setSpacing(8)
 
         self.title_edit = TitleEditor()
         self.title_edit.setFixedHeight(76)
@@ -57,14 +57,33 @@ class WorkspaceEditor(QWidget):
 
         self.notes_edit = PlainNotesEditor()
         self.notes_edit.setPlaceholderText("具体事项、材料或下一步")
-        self.notes_edit.setMinimumHeight(380)
+        self.notes_edit.setMinimumHeight(170)
         self.notes_edit.setAcceptRichText(False)
         # The target must exist before TitleEditor can wire Enter to it.
         self.title_edit.next_field_requested.connect(self.notes_edit.setFocus)
         self.steps_editor = TaskStepsEditor()
-        self.import_steps_button = QPushButton("将具体内容按换行添加为步骤")
-        self.import_steps_button.setObjectName("quietButton")
-        self.import_steps_button.setToolTip("每个非空行会新增为一个待办步骤；具体内容不会删除。")
+        self.import_steps_area = QFrame()
+        self.import_steps_area.setObjectName("importStepsArea")
+        self.import_steps_area.setStyleSheet(
+            "QFrame#importStepsArea { background:#f7faff; border:1px solid #c8d7ef; border-radius:9px; }"
+        )
+        import_layout = QVBoxLayout(self.import_steps_area)
+        import_layout.setContentsMargins(8, 6, 8, 6)
+        import_layout.setSpacing(2)
+        self.import_steps_button = QPushButton("⇩ 按正文换行新增步骤")
+        self.import_steps_button.setObjectName("importStepsButton")
+        self.import_steps_button.setToolTip("把正文中每个非空行各新增为一个待办步骤；原正文不会删除。")
+        self.import_steps_button.setStyleSheet(
+            "QPushButton#importStepsButton { text-align:left; color:#426ca8; background:#ffffff; border:1px solid #aebfe0; "
+            "border-radius:7px; padding:5px 8px; font-size:12px; font-weight:600; }"
+            "QPushButton#importStepsButton:hover { background:#eef4ff; border-color:#7597d1; }"
+            "QPushButton#importStepsButton:disabled { color:#9ca9b9; background:#f7f9fc; border-color:#dce4ef; }"
+        )
+        self.import_steps_hint = QLabel("把正文的每个非空行复制成一条待办步骤，原正文会保留。")
+        self.import_steps_hint.setWordWrap(True)
+        self.import_steps_hint.setStyleSheet("font-size:11px; color:#7f8da0; padding:0 2px;")
+        import_layout.addWidget(self.import_steps_button)
+        import_layout.addWidget(self.import_steps_hint)
         self.import_steps_button.clicked.connect(self._import_note_lines)
 
         self.date_edit = CompactDatePicker(QDate.currentDate())
@@ -98,9 +117,9 @@ class WorkspaceEditor(QWidget):
         self.fixed_check = QCheckBox("固定锁住待办（显示在当天列表最底部）")
 
         form.addWidget(self.title_edit)
-        form.addWidget(self.steps_editor, 1)
-        form.addWidget(self.notes_edit, 1)
-        form.addWidget(self.import_steps_button)
+        form.addWidget(self.steps_editor)
+        form.addWidget(self.notes_edit)
+        form.addWidget(self.import_steps_area)
         settings_label = QLabel("时间与提醒")
         settings_label.setStyleSheet("font-size:12px; color:#718096; font-weight:600; padding:14px 0 5px;")
         form.addWidget(settings_label)
@@ -159,7 +178,7 @@ class WorkspaceEditor(QWidget):
         QShortcut(QKeySequence("Ctrl+S"), self, activated=self._emit_save)
         self.title_edit.textChanged.connect(self._refresh_status)
         self.notes_edit.textChanged.connect(self._on_notes_changed)
-        self.steps_editor.changed.connect(self._refresh_status)
+        self.steps_editor.changed.connect(self._on_steps_changed)
         self.date_edit.dateChanged.connect(self._refresh_status)
         self.time_enabled.toggled.connect(self._refresh_status)
         self.hour_combo.currentIndexChanged.connect(self._refresh_status)
@@ -202,14 +221,28 @@ class WorkspaceEditor(QWidget):
 
     def _on_notes_changed(self) -> None:
         self._refresh_import_button()
+        self._update_editor_layout()
         self._refresh_status()
+
+    def _on_steps_changed(self) -> None:
+        self._update_editor_layout()
+        self._refresh_status()
+
+    def _update_editor_layout(self) -> None:
+        """Use three calm body-height tiers; long existing text can still grow."""
+        step_count = self.steps_editor.row_count()
+        base_height = 380 if step_count == 0 else (230 if step_count == 1 else 170)
+        # Every explicit paragraph remains visible. The editor scrolls as a
+        # whole for very long material instead of folding normal content away.
+        content_height = self.notes_edit.document().blockCount() * 24 + 30
+        self.notes_edit.setFixedHeight(max(base_height, content_height))
 
     def _import_note_lines(self) -> None:
         text = self.notes_edit.toPlainText()
         imported = self.steps_editor.import_note_lines(text)
         if imported:
             self._last_imported_note_text = text
-            self.import_steps_button.setText(f"已按换行添加 {imported} 个步骤")
+            self.import_steps_button.setText(f"已从正文新增 {imported} 个步骤")
             self._refresh_status()
             self._refresh_import_button()
 
@@ -219,9 +252,9 @@ class WorkspaceEditor(QWidget):
         already_imported = text == self._last_imported_note_text
         self.import_steps_button.setEnabled(has_lines and not already_imported)
         if not has_lines:
-            self.import_steps_button.setText("将具体内容按换行添加为步骤")
+            self.import_steps_button.setText("⇩ 按正文换行新增步骤")
         elif already_imported:
-            self.import_steps_button.setText("已按换行添加为步骤（修改内容后可再次导入）")
+            self.import_steps_button.setText("已从正文新增步骤（修改正文后可再次导入）")
 
     def _emit_duplicate(self) -> None:
         if self._task_id is not None and not self.is_dirty():
@@ -247,6 +280,7 @@ class WorkspaceEditor(QWidget):
         self.fixed_check.setChecked(False)
         self.steps_editor.set_steps([])
         self._loading = False
+        self._update_editor_layout()
         self.form_host.setEnabled(False)
         self.restore_button.setEnabled(False)
         self.save_button.setEnabled(False)
@@ -285,6 +319,7 @@ class WorkspaceEditor(QWidget):
         self._sync_windows_reminder_availability(bool(due))
         self.fixed_check.setChecked(bool(task["is_fixed"]))
         self._loading = False
+        self._update_editor_layout()
         self._refresh_import_button()
         self.form_host.setEnabled(True)
         self.restore_button.setEnabled(True)
@@ -331,6 +366,7 @@ class WorkspaceEditor(QWidget):
         self.fixed_check.setChecked(values["is_fixed"])
         self.steps_editor.set_steps(values.get("steps", []))
         self._loading = False
+        self._update_editor_layout()
         self._refresh_import_button()
         self._refresh_status()
 

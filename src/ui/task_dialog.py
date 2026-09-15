@@ -108,9 +108,28 @@ class TaskDialog(QDialog):
         self.title_edit.next_field_requested.connect(self.notes_edit.setFocus)
         self.steps_editor = TaskStepsEditor()
         self.steps_editor.set_steps(task_steps)
-        self.import_steps_button = QPushButton("将具体内容按换行添加为步骤")
-        self.import_steps_button.setObjectName("quietButton")
-        self.import_steps_button.setToolTip("每个非空行会新增为一个待办步骤；上方具体内容会保留。")
+        self.import_steps_area = QFrame()
+        self.import_steps_area.setObjectName("importStepsArea")
+        self.import_steps_area.setStyleSheet(
+            "QFrame#importStepsArea { background:#f7faff; border:1px solid #c8d7ef; border-radius:9px; }"
+        )
+        import_layout = QVBoxLayout(self.import_steps_area)
+        import_layout.setContentsMargins(8, 6, 8, 6)
+        import_layout.setSpacing(2)
+        self.import_steps_button = QPushButton("⇩ 按正文换行新增步骤")
+        self.import_steps_button.setObjectName("importStepsButton")
+        self.import_steps_button.setToolTip("把正文中每个非空行各新增为一个待办步骤；原正文不会删除。")
+        self.import_steps_button.setStyleSheet(
+            "QPushButton#importStepsButton { text-align:left; color:#426ca8; background:#ffffff; border:1px solid #aebfe0; "
+            "border-radius:7px; padding:5px 8px; font-size:12px; font-weight:600; }"
+            "QPushButton#importStepsButton:hover { background:#eef4ff; border-color:#7597d1; }"
+            "QPushButton#importStepsButton:disabled { color:#9ca9b9; background:#f7f9fc; border-color:#dce4ef; }"
+        )
+        self.import_steps_hint = QLabel("把正文的每个非空行复制成一条待办步骤，原正文会保留。")
+        self.import_steps_hint.setWordWrap(True)
+        self.import_steps_hint.setStyleSheet("font-size:11px; color:#7f8da0; padding:0 2px;")
+        import_layout.addWidget(self.import_steps_button)
+        import_layout.addWidget(self.import_steps_hint)
         self.import_steps_button.clicked.connect(self._import_note_lines)
         self.notes_edit.textChanged.connect(self._refresh_import_button)
 
@@ -194,7 +213,7 @@ class TaskDialog(QDialog):
         form.addRow("事项标题", title_box)
         form.addRow("", self.steps_editor)
         form.addRow("具体内容", self.notes_edit)
-        form.addRow("", self.import_steps_button)
+        form.addRow("", self.import_steps_area)
         form.addRow("日期", self.date_edit)
         form.addRow("时间", time_box)
         form.addRow("", self.fixed_check)
@@ -224,7 +243,7 @@ class TaskDialog(QDialog):
         imported = self.steps_editor.import_note_lines(text)
         if imported:
             self._last_imported_note_text = text
-            self.import_steps_button.setText(f"已按换行添加 {imported} 个步骤")
+            self.import_steps_button.setText(f"已从正文新增 {imported} 个步骤")
             self._refresh_import_button()
 
     def _refresh_import_button(self) -> None:
@@ -233,9 +252,9 @@ class TaskDialog(QDialog):
         already_imported = text == self._last_imported_note_text
         self.import_steps_button.setEnabled(has_lines and not already_imported)
         if not has_lines:
-            self.import_steps_button.setText("将具体内容按换行添加为步骤")
+            self.import_steps_button.setText("⇩ 按正文换行新增步骤")
         elif already_imported:
-            self.import_steps_button.setText("已按换行添加为步骤（修改内容后可再次导入）")
+            self.import_steps_button.setText("已从正文新增步骤（修改正文后可再次导入）")
 
     def values(self) -> dict:
         due_time = None

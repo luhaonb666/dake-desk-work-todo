@@ -31,7 +31,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.5.2"
+APP_VERSION = "4.5.3"
 
 
 def app_icon() -> QIcon:
@@ -145,11 +145,98 @@ class ExpandableNotesWidget(QWidget):
         super().mousePressEvent(event)
 
 
+class ExpandableStepsPreview(QWidget):
+    """A compact, clearly separate preview of optional execution steps."""
+
+    MAX_VISIBLE_STEPS = 3
+
+    def __init__(self, steps, parent=None) -> None:
+        super().__init__(parent)
+        self._steps = [
+            {"content": normalize_note_text(step["content"]).strip(), "is_completed": bool(step["is_completed"])}
+            for step in steps or []
+            if normalize_note_text(step["content"]).strip()
+        ]
+        self._collapsed = True
+        self._expandable = len(self._steps) > self.MAX_VISIBLE_STEPS
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 2, 0, 0)
+        layout.setSpacing(1)
+        complete = sum(1 for step in self._steps if step["is_completed"])
+        self.heading = QLabel(f"待办步骤  {complete}/{len(self._steps)}")
+        self.heading.setTextFormat(Qt.TextFormat.PlainText)
+        self.heading.setStyleSheet("font-size:11px; color:#8793a2; font-weight:600; padding-left:30px; margin-top:2px;")
+        self.rows_host = QWidget()
+        self.rows_layout = QVBoxLayout(self.rows_host)
+        self.rows_layout.setContentsMargins(0, 0, 0, 0)
+        self.rows_layout.setSpacing(1)
+        self.peek = FadedPreviewLine("")
+        self.hint = QLabel()
+        self.hint.setStyleSheet("font-size:11px; color:#8092ae; font-weight:500; padding-left:52px;")
+        for widget in (self.heading, self.rows_host, self.peek, self.hint):
+            widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            layout.addWidget(widget)
+        if self._expandable:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._update_text()
+
+    @staticmethod
+    def _summary(step: dict) -> str:
+        lines = step["content"].splitlines()
+        first_line = lines[0] if lines else ""
+        remaining = max(0, len(lines) - 1)
+        suffix = f"（还有 {remaining} 行）" if remaining else ""
+        marker = "✓" if step["is_completed"] else "·"
+        return f"{marker} {first_line}{suffix}"
+
+    def _clear_rows(self) -> None:
+        while self.rows_layout.count():
+            item = self.rows_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+    def _update_text(self) -> None:
+        self._clear_rows()
+        visible_steps = self._steps if not self._collapsed else self._steps[:self.MAX_VISIBLE_STEPS]
+        for step in visible_steps:
+            label = QLabel(self._summary(step))
+            label.setTextFormat(Qt.TextFormat.PlainText)
+            label.setWordWrap(True)
+            label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            color = "#82906f" if step["is_completed"] else "#6f7e91"
+            label.setStyleSheet(f"font-size:11px; color:{color}; padding-left:32px;")
+            self.rows_layout.addWidget(label)
+        if self._collapsed and self._expandable:
+            self.peek._text = self._summary(self._steps[self.MAX_VISIBLE_STEPS])
+            self.peek.line.setText(self.peek._text)
+            self.peek.setVisible(True)
+            self.hint.setText("↓ 点击展开全部待办步骤")
+            self.hint.setVisible(True)
+            self.setToolTip("点击展开全部待办步骤")
+        elif self._expandable:
+            self.peek.setVisible(False)
+            self.hint.setText("↑ 点击收起待办步骤")
+            self.hint.setVisible(True)
+            self.setToolTip("点击收起待办步骤")
+        else:
+            self.peek.setVisible(False)
+            self.hint.setVisible(False)
+            self.setToolTip("")
+
+    def mousePressEvent(self, event):  # noqa: N802
+        if self._expandable and event.button() == Qt.MouseButton.LeftButton:
+            self._collapsed = not self._collapsed
+            self._update_text()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
 class TaskCard(QFrame):
     def __init__(
         self, task, on_complete, on_edit, on_float, on_delete, parent=None,
         preview: bool = False, on_select=None, selected: bool = False,
-        workspace_mode: bool = False, step_summary: tuple[int, int] = (0, 0), on_move_today=None,
+        workspace_mode: bool = False, step_summary: tuple[int, int] = (0, 0), task_steps=None, on_move_today=None,
     ) -> None:
         super().__init__(parent)
         self._on_select = on_select
@@ -188,7 +275,7 @@ class TaskCard(QFrame):
                 task["notes"],
                 max_visible_lines=8 if workspace_mode else ExpandableNotesWidget.MAX_VISIBLE_LINES,
                 expandable=not workspace_mode,
-                collapsed_hint="更多内容请在右侧查看",
+                collapsed_hint="更多内容请在右侧查看" if workspace_mode else "↓ 点击展开完整说明",
             )
             if workspace_mode:
                 # A workspace card is selected as one whole target.  Its preview
@@ -197,16 +284,10 @@ class TaskCard(QFrame):
             content.addWidget(notes)
         completed_steps, total_steps = step_summary
         if total_steps:
-            progress = QLabel(
-                "待办步骤已完成 · 可勾选事项" if completed_steps == total_steps
-                else f"待办步骤 {completed_steps}/{total_steps}"
-            )
-            progress.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-            progress.setStyleSheet(
-                "font-size:11px; color:#9a6d24; font-weight:600; margin-top:2px;"
-                if completed_steps == total_steps else "font-size:11px; color:#8793a2; margin-top:2px;"
-            )
-            content.addWidget(progress)
+            steps_preview = ExpandableStepsPreview(task_steps)
+            if workspace_mode:
+                steps_preview.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            content.addWidget(steps_preview)
         if overdue:
             warning = QLabel("已超时")
             warning.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -506,6 +587,7 @@ class MainWindow(QMainWindow):
         self.workspace_selected_task_id: int | None = None
         self._workspace_list_signature = None
         self._workspace_cards: dict[int, TaskCard] = {}
+        self._tomorrow_preview_expanded = False
         self.page_stack = QStackedWidget()
         self.setCentralWidget(self.page_stack)
         root = QWidget()
@@ -691,6 +773,7 @@ class MainWindow(QMainWindow):
             ("unfinished", "未完成"),
             ("all", "全部"),
             ("fixed", "固定待办"),
+            ("important", "重要提醒"),
             ("previous", "之前未完成"),
         )
         for key, text in scope_options:
@@ -886,7 +969,9 @@ class MainWindow(QMainWindow):
         today = self.db.today()
         pending = self.db.all_pending_tasks()
         previous = [task for task in pending if task["task_date"] < today]
+        important = [task for task in self.db.all_tasks() if bool(task["windows_reminder_enabled"])]
         self.workspace_scope_buttons["previous"].setText(f"之前未完成（{len(previous)}）")
+        self.workspace_scope_buttons["important"].setText(f"重要提醒（{len(important)}）")
         query = self.workspace_search.text().strip().casefold()
         if query:
             tasks = [
@@ -903,6 +988,9 @@ class MainWindow(QMainWindow):
         elif self._workspace_scope == "fixed":
             tasks = self.db.fixed_tasks()
             label = f"固定待办（{len(tasks)}）"
+        elif self._workspace_scope == "important":
+            tasks = important
+            label = f"重要提醒（{len(tasks)}）"
         elif self._workspace_scope == "unfinished":
             if self.workspace_all_unfinished.isChecked():
                 tasks = pending
@@ -930,9 +1018,13 @@ class MainWindow(QMainWindow):
             ),
         )
 
+    def _steps_for(self, task):
+        """Cards receive a compact read-only step preview; editing stays on the right."""
+        return self.db.task_steps(int(task["id"]))
+
     def _step_summary_for(self, task) -> tuple[int, int]:
-        """Cards only need a tiny progress hint; full rows stay in the editor."""
-        return self.db.step_summaries([int(task["id"])]).get(int(task["id"]), (0, 0))
+        steps = self._steps_for(task)
+        return sum(bool(step["is_completed"]) for step in steps), len(steps)
 
     def _apply_workspace_selection(self) -> None:
         for task_id, card in self._workspace_cards.items():
@@ -958,6 +1050,7 @@ class MainWindow(QMainWindow):
             message = "没有找到匹配事项。" if self.workspace_search.text().strip() else {
                 "previous": "之前没有未完成的事项。",
                 "fixed": "还没有固定待办。",
+                "important": "还没有开启准点强提醒的事项。",
                 "all": "还没有保存的事项。",
                 "unfinished": "这一天没有未完成事项。",
             }.get(self._workspace_scope, "今天还没有事项。")
@@ -968,7 +1061,7 @@ class MainWindow(QMainWindow):
             current_day = None
             should_group_dates = bool(
                 self.workspace_search.text().strip()
-                or self._workspace_scope in {"previous", "all", "fixed"}
+                or self._workspace_scope in {"previous", "all", "fixed", "important"}
                 or (self._workspace_scope == "unfinished" and self.workspace_all_unfinished.isChecked())
             )
             for task in tasks:
@@ -985,6 +1078,7 @@ class MainWindow(QMainWindow):
                     selected=task["id"] == self.workspace_selected_task_id,
                     workspace_mode=True,
                     step_summary=self._step_summary_for(task),
+                    task_steps=self._steps_for(task),
                     on_move_today=None,
                 )
                 self.workspace_list_layout.addWidget(card)
@@ -1186,7 +1280,7 @@ class MainWindow(QMainWindow):
             section_title = "今日事项" if active_tab == 0 else f"{selected_day} · 未完成"
             self.list_layout.addWidget(self.section_label(section_title))
             for task in normal:
-                self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task)))
+                self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task), task_steps=self._steps_for(task)))
         else:
             empty_text = "今天还没有事项。点击右上角“添加事项”开始安排。" if active_tab == 0 else "这一天没有未完成事项。"
             empty = QLabel(empty_text)
@@ -1197,12 +1291,14 @@ class MainWindow(QMainWindow):
             fixed_label.setFixedHeight(16)
             self.list_layout.addWidget(fixed_label)
             for task in fixed:
-                self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task)))
+                self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task), task_steps=self._steps_for(task)))
         if active_tab == 0:
             tomorrow = (now + timedelta(days=1)).date().isoformat()
-            tomorrow_tasks = self.db.tasks_for(tomorrow)
-            preview = [task for task in tomorrow_tasks if not task["is_fixed"]][:2]
-            preview += [task for task in tomorrow_tasks if task["is_fixed"]][:2]
+            tomorrow_tasks = sorted(
+                self.db.tasks_for(tomorrow),
+                key=lambda task: (task["due_time"] is None, task["due_time"] or "", task["created_at"]),
+            )
+            preview = tomorrow_tasks if self._tomorrow_preview_expanded else tomorrow_tasks[:2]
             if preview:
                 self.list_layout.addSpacing(30)
                 preview_host = QFrame()
@@ -1213,14 +1309,27 @@ class MainWindow(QMainWindow):
                 preview_layout = QVBoxLayout(preview_host)
                 preview_layout.setContentsMargins(8, 4, 8, 8)
                 preview_layout.setSpacing(7)
-                preview_layout.addWidget(self.section_label("明日预览（继续向下滚动查看）", 5))
+                preview_layout.addWidget(self.section_label(f"明日事项（{len(tomorrow_tasks)}）", 5))
                 for task in preview:
                     preview_layout.addWidget(
-                        TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, preview=True, step_summary=self._step_summary_for(task))
+                        TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, preview=True, step_summary=self._step_summary_for(task), task_steps=self._steps_for(task))
                     )
+                if len(tomorrow_tasks) > 2:
+                    toggle = QPushButton(
+                        "↑ 收起明日事项" if self._tomorrow_preview_expanded
+                        else f"↓ 展开明日全部（还有 {len(tomorrow_tasks) - 2} 条）"
+                    )
+                    toggle.setObjectName("quietButton")
+                    toggle.setToolTip("直接展开或收起明日的其余事项")
+                    toggle.clicked.connect(self._toggle_tomorrow_preview)
+                    preview_layout.addWidget(toggle)
                 self.list_layout.addWidget(preview_host)
         self.list_layout.addStretch(1)
         self.refresh_float()
+
+    def _toggle_tomorrow_preview(self) -> None:
+        self._tomorrow_preview_expanded = not self._tomorrow_preview_expanded
+        self.render()
 
     def _render_all_pending(self, tasks) -> None:
         if not tasks:
@@ -1233,7 +1342,7 @@ class MainWindow(QMainWindow):
             if task["task_date"] != current_date:
                 current_date = task["task_date"]
                 self.list_layout.addWidget(self.section_label(f"{current_date} · 未完成"))
-            self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task)))
+            self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task), task_steps=self._steps_for(task)))
 
     def _render_all_tasks(self, tasks) -> None:
         if not tasks:
@@ -1246,7 +1355,7 @@ class MainWindow(QMainWindow):
             if task["task_date"] != current_date:
                 current_date = task["task_date"]
                 self.list_layout.addWidget(self.section_label(f"{current_date} · 全部事项"))
-            self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task)))
+            self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task), task_steps=self._steps_for(task)))
 
     @staticmethod
     def _is_past_due(values: dict) -> bool:

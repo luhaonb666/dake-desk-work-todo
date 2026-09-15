@@ -1,4 +1,4 @@
-"""Focused V4.5.2 regression checks for settings, reminders, and task views."""
+"""Focused V4.5.3 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -9,12 +9,12 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
-from PyQt6.QtCore import QDate, QMimeData
+from PyQt6.QtCore import QDate, QMimeData, Qt
 from PyQt6.QtWidgets import QApplication, QCheckBox, QLabel, QMessageBox
 
 from storage.database import Database
 from services.windows_notifications import planned_reminders
-from ui.main_window import ExpandableNotesWidget, FadedPreviewLine, MainWindow
+from ui.main_window import ExpandableNotesWidget, ExpandableStepsPreview, FadedPreviewLine, MainWindow
 from ui.float_window import FloatCard, FloatWindow
 from ui.controls import CompactDatePicker, normalize_note_text
 from ui.desktop_note import DesktopNoteWindow
@@ -562,6 +562,55 @@ class V200Tests(unittest.TestCase):
         self.assertEqual(editor._rows()[0].edit.toPlainText(), "")
         editor._rows()[0].edit.setPlainText("核价\n确认折扣")
         self.assertEqual(editor.values()[0]["content"], "核价\n确认折扣")
+
+    def test_v453_step_plus_inserts_directly_below_the_current_step(self) -> None:
+        editor = TaskStepsEditor()
+        editor.start_button.click()
+        editor._rows()[0].edit.setPlainText("核价")
+        editor._rows()[0].insert.click()
+        editor._rows()[1].edit.setPlainText("盖章")
+        editor._rows()[0].insert.click()
+        self.assertEqual(len(editor._rows()), 3)
+        self.assertEqual([row.edit.toPlainText() for row in editor._rows()], ["核价", "", "盖章"])
+        self.assertNotIn("新建步骤", editor.panel.findChild(QLabel).text())
+
+    def test_v453_step_preview_has_indented_rows_and_can_expand(self) -> None:
+        preview = ExpandableStepsPreview([
+            {"content": "核价\n确认折扣", "is_completed": False},
+            {"content": "盖章", "is_completed": False},
+            {"content": "付款", "is_completed": True},
+            {"content": "提交报告", "is_completed": False},
+        ])
+        self.assertEqual(preview.heading.text(), "待办步骤  1/4")
+        self.assertIn("还有 1 行", preview.rows_layout.itemAt(0).widget().text())
+        self.assertEqual(preview.hint.text(), "↓ 点击展开全部待办步骤")
+        preview._collapsed = False
+        preview._update_text()
+        self.assertEqual(preview.rows_layout.count(), 4)
+        self.assertEqual(preview.hint.text(), "↑ 点击收起待办步骤")
+
+    def test_v453_import_steps_is_a_framed_explained_action(self) -> None:
+        dialog = TaskDialog()
+        self.assertEqual(dialog.import_steps_area.objectName(), "importStepsArea")
+        self.assertIn("原正文会保留", dialog.import_steps_hint.text())
+        self.assertIn("新增步骤", dialog.import_steps_button.text())
+
+    def test_v453_workspace_body_uses_three_stable_step_height_tiers(self) -> None:
+        editor = WorkspaceEditor()
+        self.assertEqual(editor.notes_edit.height(), 380)
+        editor.steps_editor.start()
+        self.assertEqual(editor.notes_edit.height(), 230)
+        editor.steps_editor.add_row(focus=False)
+        self.assertEqual(editor.notes_edit.height(), 170)
+        editor.steps_editor.remove_row(editor.steps_editor._rows()[1])
+        self.assertEqual(editor.notes_edit.height(), 230)
+
+    def test_v453_desktop_note_is_not_a_global_topmost_window(self) -> None:
+        note = DesktopNoteWindow()
+        self.assertFalse(bool(note.windowFlags() & Qt.WindowType.WindowStaysOnTopHint))
+        note.enter_editing()
+        self.assertFalse(note.close_note_button.isHidden())
+        note.deleteLater()
 
     def test_v452_steps_and_notes_are_parallel_and_notes_import_as_steps(self) -> None:
         dialog = TaskDialog()

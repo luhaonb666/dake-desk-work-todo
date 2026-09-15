@@ -13,6 +13,7 @@ class _StepRow(QWidget):
 
     changed = pyqtSignal()
     remove_requested = pyqtSignal(object)
+    insert_requested = pyqtSignal(object)
 
     def __init__(self, content: str = "", completed: bool = False, parent=None) -> None:
         super().__init__(parent)
@@ -23,9 +24,17 @@ class _StepRow(QWidget):
         self.check.setChecked(completed)
         self.edit = QPlainTextEdit()
         self.edit.setPlainText(content)
-        self.edit.setPlaceholderText("步骤 1：写下这一步需要做什么；可继续换行补充")
+        self.edit.setPlaceholderText("例如：核对报价、盖章确认、提交报告；可继续换行补充")
         self.edit.setFixedHeight(58)
         self.edit.setStyleSheet("QPlainTextEdit { padding:5px 7px; }")
+        self.insert = QPushButton("＋")
+        self.insert.setToolTip("在这一步下方新增步骤")
+        self.insert.setFixedSize(26, 26)
+        self.insert.setStyleSheet(
+            "QPushButton { color:#5d7fb8; background:#f5f8ff; border:1px solid #c8d7f1; "
+            "border-radius:8px; font-size:16px; font-weight:600; padding:0; }"
+            "QPushButton:hover { color:#315bb7; background:#eaf1ff; border-color:#91ace0; }"
+        )
         self.remove = QPushButton("×")
         self.remove.setToolTip("删除这一步")
         self.remove.setFixedSize(26, 26)
@@ -35,10 +44,12 @@ class _StepRow(QWidget):
         )
         row.addWidget(self.check, 0)
         row.addWidget(self.edit, 1)
+        row.addWidget(self.insert, 0)
         row.addWidget(self.remove, 0)
         self.check.toggled.connect(self.changed)
         self.edit.textChanged.connect(self.changed)
         self.remove.clicked.connect(lambda: self.remove_requested.emit(self))
+        self.insert.clicked.connect(lambda: self.insert_requested.emit(self))
 
     def value(self) -> dict:
         return {"content": self.edit.toPlainText().strip(), "is_completed": self.check.isChecked()}
@@ -74,12 +85,10 @@ class TaskStepsEditor(QWidget):
         title.setStyleSheet("font-size:13px; color:#536273; font-weight:600;")
         heading.addWidget(title)
         heading.addStretch()
-        self.add_button = QPushButton("＋ 新建步骤")
-        self.add_button.setObjectName("quietButton")
-        self.add_button.setToolTip("新建步骤 2、步骤 3……每一步都可写多行。")
-        heading.addWidget(self.add_button)
         panel_layout.addLayout(heading)
-        self.guide = QLabel("每一步可写多行；勾选步骤只记录进度，整条事项仍由你决定何时完成。")
+        self.guide = QLabel(
+            "例如：核对报价、盖章确认、提交报告。每一步可写多行；勾选步骤只记录进度，整条事项仍由你决定何时完成。"
+        )
         self.guide.setWordWrap(True)
         self.guide.setStyleSheet("font-size:11px; color:#8793a2; padding:0 2px;")
         panel_layout.addWidget(self.guide)
@@ -91,7 +100,6 @@ class TaskStepsEditor(QWidget):
         outer.addWidget(self.panel)
 
         self.start_button.clicked.connect(lambda _checked=False: self.start())
-        self.add_button.clicked.connect(lambda _checked=False: self.add_row())
         self._refresh_panel()
 
     def _rows(self) -> list[_StepRow]:
@@ -108,14 +116,32 @@ class TaskStepsEditor(QWidget):
         else:
             self._refresh_panel()
 
-    def add_row(self, content: str = "", completed: bool = False, *, focus: bool = True) -> None:
+    def _new_row(self, content: str = "", completed: bool = False) -> _StepRow:
         row = _StepRow(content, completed, self.rows_host)
         row.changed.connect(self._on_changed)
         row.remove_requested.connect(self.remove_row)
+        row.insert_requested.connect(self.insert_after)
+        return row
+
+    def add_row(self, content: str = "", completed: bool = False, *, focus: bool = True) -> None:
+        row = self._new_row(content, completed)
         self.rows.addWidget(row)
         self._refresh_panel()
         if focus:
             row.edit.setFocus()
+        self._on_changed()
+
+    def insert_after(self, existing: _StepRow) -> None:
+        """Create the next step beside the row the user is currently writing."""
+        rows = self._rows()
+        try:
+            index = rows.index(existing) + 1
+        except ValueError:
+            index = self.rows.count()
+        row = self._new_row()
+        self.rows.insertWidget(index, row)
+        self._refresh_panel()
+        row.edit.setFocus()
         self._on_changed()
 
     def import_note_lines(self, text: str) -> int:
@@ -146,6 +172,10 @@ class TaskStepsEditor(QWidget):
     def values(self) -> list[dict]:
         return [row.value() for row in self._rows() if row.value()["content"]]
 
+    def row_count(self) -> int:
+        """Count visible editing rows, including a newly created blank first step."""
+        return len(self._rows())
+
     def _on_changed(self) -> None:
         self._refresh_guide()
         if not self._loading:
@@ -162,5 +192,7 @@ class TaskStepsEditor(QWidget):
             self.guide.setText("所有待办步骤已完成；如整条事项也完成，请勾选事项左侧方框。")
             self.guide.setStyleSheet("font-size:11px; color:#9a6d24; font-weight:600; padding:0 2px;")
         else:
-            self.guide.setText("每一步可写多行；勾选步骤只记录进度，整条事项仍由你决定何时完成。")
+            self.guide.setText(
+                "例如：核对报价、盖章确认、提交报告。每一步可写多行；勾选步骤只记录进度，整条事项仍由你决定何时完成。"
+            )
             self.guide.setStyleSheet("font-size:11px; color:#8793a2; padding:0 2px;")
