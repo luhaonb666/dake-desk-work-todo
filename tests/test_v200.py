@@ -1,4 +1,4 @@
-"""Focused V4.5.5 regression checks for settings, reminders, and task views."""
+"""Focused V4.5.6 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -604,10 +604,10 @@ class V200Tests(unittest.TestCase):
     def test_v453_import_steps_is_a_framed_explained_action(self) -> None:
         dialog = TaskDialog()
         self.assertIsNotNone(dialog.notes_section)
-        self.assertEqual(dialog.import_steps_hint.text(), "按每行\n新增一步\n正文保留")
+        self.assertEqual(dialog.import_steps_hint.text(), "按每行\n新增一步\n\n正文保留")
         self.assertIn("原正文不会删除", dialog.import_steps_hint.toolTip())
         self.assertIn("拆成步骤", dialog.import_steps_button.text())
-        self.assertEqual(dialog.import_steps_rail.width(), 94)
+        self.assertEqual(dialog.import_steps_rail.width(), 72)
 
     def test_v453_workspace_body_uses_three_stable_step_height_tiers(self) -> None:
         editor = WorkspaceEditor()

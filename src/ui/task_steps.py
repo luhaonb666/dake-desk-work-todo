@@ -6,8 +6,22 @@ import math
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QCheckBox, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget,
+    QCheckBox, QFrame, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
+
+
+class _StepTextEdit(QPlainTextEdit):
+    """Expose focus changes so the row shell owns the complete focus border."""
+
+    focus_changed = pyqtSignal(bool)
+
+    def focusInEvent(self, event):  # noqa: N802
+        super().focusInEvent(event)
+        self.focus_changed.emit(True)
+
+    def focusOutEvent(self, event):  # noqa: N802
+        super().focusOutEvent(event)
+        self.focus_changed.emit(False)
 
 
 class _StepRow(QWidget):
@@ -24,11 +38,18 @@ class _StepRow(QWidget):
         row.setSpacing(6)
         self.check = QCheckBox()
         self.check.setChecked(completed)
-        self.edit = QPlainTextEdit()
+        self.edit_shell = QFrame()
+        self.edit_shell.setObjectName("stepInputShell")
+        shell_layout = QVBoxLayout(self.edit_shell)
+        shell_layout.setContentsMargins(2, 2, 2, 2)
+        shell_layout.setSpacing(0)
+        self.edit = _StepTextEdit()
         self.edit.setPlainText(content)
         self.edit.setPlaceholderText("例如：核对报价、盖章确认、提交报告；可继续换行补充")
         self.edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.edit.setStyleSheet("QPlainTextEdit { padding:5px 7px; }")
+        self.edit.setFrameShape(QFrame.Shape.NoFrame)
+        self.edit.setStyleSheet("QPlainTextEdit { padding:4px 5px; border:none; background:#ffffff; }")
+        shell_layout.addWidget(self.edit)
         self.insert = QPushButton("＋")
         self.insert.setToolTip("在这一步下方新增步骤")
         self.insert.setFixedSize(26, 26)
@@ -45,15 +66,26 @@ class _StepRow(QWidget):
             "QPushButton:hover { color:#a34a4a; background:#f9eaea; border-radius:8px; }"
         )
         row.addWidget(self.check, 0)
-        row.addWidget(self.edit, 1)
+        row.addWidget(self.edit_shell, 1)
         row.addWidget(self.insert, 0)
         row.addWidget(self.remove, 0)
         self.check.toggled.connect(self.changed)
         self.edit.textChanged.connect(self._resize_to_content)
         self.edit.textChanged.connect(self.changed)
+        self.edit.focus_changed.connect(self._refresh_focus_border)
         self.remove.clicked.connect(lambda: self.remove_requested.emit(self))
         self.insert.clicked.connect(lambda: self.insert_requested.emit(self))
         self._resize_to_content()
+        self._refresh_focus_border(False)
+
+    def _refresh_focus_border(self, focused: bool) -> None:
+        color = "#7f9cf1" if focused else "#d8e1ee"
+        width = 2 if focused else 1
+        self.edit_shell.setStyleSheet(
+            "QFrame#stepInputShell {"
+            f"background:#ffffff; border:{width}px solid {color}; border-radius:9px;"
+            "}"
+        )
 
     def _resize_to_content(self) -> None:
         """Show two lines by default, then grow only to a calm four-and-a-half lines."""
@@ -63,7 +95,7 @@ class _StepRow(QWidget):
         # Padding plus a small bottom allowance keeps the native rounded focus
         # border fully inside the row at 125% and 150% display scaling.
         height = math.ceil(visible_lines * line_height) + 18
-        self.edit.setFixedHeight(height)
+        self.edit_shell.setFixedHeight(height)
         self.setFixedHeight(height)
 
     def value(self) -> dict:
@@ -79,6 +111,7 @@ class TaskStepsEditor(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._loading = False
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(5)
@@ -108,7 +141,7 @@ class TaskStepsEditor(QWidget):
         self.rows_host = QWidget()
         self.rows = QVBoxLayout(self.rows_host)
         self.rows.setContentsMargins(0, 0, 0, 0)
-        self.rows.setSpacing(5)
+        self.rows.setSpacing(2)
         panel_layout.addWidget(self.rows_host)
         outer.addWidget(self.panel)
 
@@ -198,6 +231,7 @@ class TaskStepsEditor(QWidget):
 
     def _on_changed(self) -> None:
         self._refresh_guide()
+        self.updateGeometry()
         if not self._loading:
             self.changed.emit()
 
@@ -205,6 +239,7 @@ class TaskStepsEditor(QWidget):
         active = bool(self._rows())
         self.start_button.setVisible(not active)
         self.panel.setVisible(active)
+        self.updateGeometry()
 
     def _refresh_guide(self) -> None:
         values = self.values()

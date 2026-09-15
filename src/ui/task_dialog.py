@@ -118,12 +118,14 @@ class TaskDialog(QDialog):
         notes_content.addWidget(self.notes_edit, 1)
         self.import_steps_rail = QFrame()
         self.import_steps_rail.setObjectName("importStepsRail")
-        self.import_steps_rail.setFixedWidth(94)
+        # This rail is a conversion affordance, not a second editor. Keep it
+        # only as wide as its two-line action label plus a little breathing room.
+        self.import_steps_rail.setFixedWidth(72)
         self.import_steps_rail.setStyleSheet(
             "QFrame#importStepsRail { background:#f7faff; border:1px solid #c8d7ef; border-radius:9px; }"
         )
         rail_layout = QVBoxLayout(self.import_steps_rail)
-        rail_layout.setContentsMargins(5, 6, 5, 6)
+        rail_layout.setContentsMargins(4, 6, 4, 6)
         rail_layout.setSpacing(4)
         self.import_steps_button = QPushButton("⇩\n拆成步骤")
         self.import_steps_button.setObjectName("importStepsButton")
@@ -134,7 +136,7 @@ class TaskDialog(QDialog):
             "QPushButton#importStepsButton:hover { background:#eef4ff; border-color:#7597d1; }"
             "QPushButton#importStepsButton:disabled { color:#9ca9b9; background:#f7f9fc; border-color:#dce4ef; }"
         )
-        self.import_steps_hint = QLabel("按每行\n新增一步\n正文保留")
+        self.import_steps_hint = QLabel("按每行\n新增一步\n\n正文保留")
         self.import_steps_hint.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         self.import_steps_hint.setToolTip("把正文的每个非空行复制成一条待办步骤，原正文不会删除。")
         self.import_steps_hint.setStyleSheet("font-size:10px; color:#7f8da0; line-height:1.35;")
