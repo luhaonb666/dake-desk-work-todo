@@ -32,9 +32,13 @@ def planned_reminders(tasks: Iterable, now: datetime) -> list[ScheduledReminder]
     reminders: list[ScheduledReminder] = []
     for task in tasks:
         try:
-            when = datetime.strptime(f"{task['task_date']} {task['due_time']}", "%Y-%m-%d %H:%M")
-            offset = task["important_reminder_offset_minutes"] if "important_reminder_offset_minutes" in task.keys() else 0
-            when -= timedelta(minutes=max(0, int(offset)))
+            custom_at = task["important_reminder_at"] if "important_reminder_at" in task.keys() else None
+            if custom_at:
+                when = datetime.strptime(str(custom_at), "%Y-%m-%d %H:%M")
+            else:
+                when = datetime.strptime(f"{task['task_date']} {task['due_time']}", "%Y-%m-%d %H:%M")
+                offset = task["important_reminder_offset_minutes"] if "important_reminder_offset_minutes" in task.keys() else 0
+                when -= timedelta(minutes=max(0, int(offset)))
         except (KeyError, TypeError, ValueError):
             continue
         if when > now:
@@ -43,7 +47,7 @@ def planned_reminders(tasks: Iterable, now: datetime) -> list[ScheduledReminder]
                     task_id=int(task["id"]),
                     when=when,
                     title=str(task["title"]),
-                    due_time=str(task["due_time"]),
+                    due_time=when.strftime("%H:%M"),
                 )
             )
     return reminders

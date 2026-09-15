@@ -32,7 +32,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.6.1"
+APP_VERSION = "4.6.2"
 
 
 def app_icon() -> QIcon:
@@ -1158,14 +1158,11 @@ class MainWindow(QMainWindow):
                 int(task["important_reminder_offset_minutes"])
                 if "important_reminder_offset_minutes" in task.keys() else 0
             ),
-            important_repeat_minutes=(
-                int(task["important_repeat_minutes"])
-                if "important_repeat_minutes" in task.keys() else 0
+            important_reminder_at=(
+                task["important_reminder_at"] if "important_reminder_at" in task.keys() else None
             ),
-            important_repeat_limit=(
-                int(task["important_repeat_limit"])
-                if "important_repeat_limit" in task.keys() else 0
-            ),
+            recurrence_unit=task["recurrence_unit"] if "recurrence_unit" in task.keys() else "none",
+            recurrence_interval=int(task["recurrence_interval"] or 1) if "recurrence_interval" in task.keys() else 1,
             content_mode=task["content_mode"] if "content_mode" in task.keys() else "notes",
         )
         self.db.replace_task_steps(copied_id, [
@@ -1397,13 +1394,23 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError):
             return False
 
+    @staticmethod
+    def _is_past_important_reminder(values: dict) -> bool:
+        custom_at = values.get("important_reminder_at")
+        if custom_at:
+            try:
+                return datetime.strptime(custom_at, "%Y-%m-%d %H:%M") <= datetime.now()
+            except (TypeError, ValueError):
+                return False
+        return MainWindow._is_past_due(values)
+
     def _skip_historical_alerts_if_needed(self, task_id: int, values: dict) -> None:
         """Past-due items remain unfinished and overdue, but never replay alerts."""
         if self._is_past_due(values):
             self.db.mark_alerted(task_id, "pre")
             self.db.mark_alerted(task_id, "due")
-            if values.get("windows_reminder_enabled"):
-                self.db.acknowledge_important_reminder(task_id)
+        if values.get("windows_reminder_enabled") and self._is_past_important_reminder(values):
+            self.db.acknowledge_important_reminder(task_id)
 
     def add_task(self) -> None:
         dialog = TaskDialog(parent=self)
@@ -1442,7 +1449,16 @@ class MainWindow(QMainWindow):
             self.render()
 
     def set_completed(self, task_id: int, completed: bool) -> None:
+        task = self.db.task_by_id(task_id)
+        was_open = task is not None and not bool(task["is_completed"])
         self.db.set_completed(task_id, completed)
+        if completed and was_open:
+            next_id = self.db.create_next_recurrence(task_id)
+            if next_id is not None:
+                self.db.replace_task_steps(next_id, [
+                    {"content": step["content"], "is_completed": False}
+                    for step in self.db.task_steps(task_id)
+                ])
         if completed:
             self.important_reminder.remove_task(task_id)
         self._sync_windows_reminders()
@@ -1486,7 +1502,7 @@ class MainWindow(QMainWindow):
 
     def dismiss_important_reminder(self, task_id: int) -> None:
         """Dismiss the reminder only; the underlying task remains unfinished."""
-        self.db.dismiss_or_repeat_important_reminder(task_id)
+        self.db.acknowledge_important_reminder(task_id)
         self._refresh_important_reminders()
 
     def snooze_important_reminder(self, task_id: int, minutes: int) -> None:

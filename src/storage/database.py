@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import sqlite3
+from calendar import monthrange
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
 
 
 class Database:
-    SCHEMA_VERSION = 9
+    SCHEMA_VERSION = 10
 
     def __init__(self, path: Path) -> None:
         self.connection = sqlite3.connect(path)
@@ -152,6 +153,16 @@ class Database:
                 if column not in columns:
                     self.connection.execute(f"ALTER TABLE tasks ADD COLUMN {column} {definition}")
             version = 9
+        if version < 10:
+            columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(tasks)")}
+            for column, definition in (
+                ("important_reminder_at", "TEXT"),
+                ("recurrence_unit", "TEXT NOT NULL DEFAULT 'none'"),
+                ("recurrence_interval", "INTEGER NOT NULL DEFAULT 1"),
+            ):
+                if column not in columns:
+                    self.connection.execute(f"ALTER TABLE tasks ADD COLUMN {column} {definition}")
+            version = 10
         self.connection.execute(
             "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)",
             (str(version),),
@@ -185,21 +196,24 @@ class Database:
         is_fixed: bool,
         windows_reminder_enabled: bool = False,
         important_reminder_offset_minutes: int = 0,
-        important_repeat_minutes: int = 0,
-        important_repeat_limit: int = 0,
+        important_reminder_at: str | None = None,
+        recurrence_unit: str = "none",
+        recurrence_interval: int = 1,
         content_mode: str = "notes",
     ) -> int:
         now = datetime.now().isoformat(timespec="seconds")
         cursor = self.connection.execute(
             """INSERT INTO tasks(
                    title, notes, task_date, due_time, is_fixed, windows_reminder_enabled,
-                   important_reminder_offset_minutes, important_repeat_minutes, important_repeat_limit,
+                   important_reminder_offset_minutes, important_reminder_at,
+                   recurrence_unit, recurrence_interval,
                    content_mode, created_at, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 title, notes, task_date, due_time, int(is_fixed), int(windows_reminder_enabled),
                 max(0, int(important_reminder_offset_minutes)),
-                max(0, int(important_repeat_minutes)), max(0, int(important_repeat_limit)),
+                self._normalize_reminder_at(important_reminder_at),
+                self._normalize_recurrence_unit(recurrence_unit), max(1, int(recurrence_interval)),
                 "steps" if content_mode == "steps" else "notes", now, now,
             ),
         )
@@ -209,8 +223,8 @@ class Database:
     def update_task(self, task_id: int, **fields: Any) -> None:
         allowed = {
             "title", "notes", "task_date", "due_time", "is_fixed", "float_slot", "windows_reminder_enabled",
-            "important_reminder_offset_minutes",
-            "important_repeat_minutes", "important_repeat_limit",
+            "important_reminder_offset_minutes", "important_reminder_at",
+            "recurrence_unit", "recurrence_interval",
             "content_mode",
         }
         values = {key: value for key, value in fields.items() if key in allowed}
@@ -218,9 +232,12 @@ class Database:
             values["content_mode"] = "steps" if values["content_mode"] == "steps" else "notes"
         if "important_reminder_offset_minutes" in values:
             values["important_reminder_offset_minutes"] = max(0, int(values["important_reminder_offset_minutes"]))
-        for key in ("important_repeat_minutes", "important_repeat_limit"):
-            if key in values:
-                values[key] = max(0, int(values[key]))
+        if "important_reminder_at" in values:
+            values["important_reminder_at"] = self._normalize_reminder_at(values["important_reminder_at"])
+        if "recurrence_unit" in values:
+            values["recurrence_unit"] = self._normalize_recurrence_unit(values["recurrence_unit"])
+        if "recurrence_interval" in values:
+            values["recurrence_interval"] = max(1, int(values["recurrence_interval"]))
         if not values:
             return
         # A rescheduled task is a new reminder schedule. Do not clear alert
@@ -233,6 +250,7 @@ class Database:
                 "important_reminder_offset_minutes" in values
                 and values["important_reminder_offset_minutes"] != current["important_reminder_offset_minutes"]
             )
+            or ("important_reminder_at" in values and values["important_reminder_at"] != current["important_reminder_at"])
         )
         if time_changed:
             values["pre_alerted_at"] = None
@@ -262,6 +280,83 @@ class Database:
             (int(completed), now, int(completed), datetime.now().isoformat(timespec="seconds"), task_id),
         )
         self.connection.commit()
+
+    @staticmethod
+    def _normalize_reminder_at(value: str | None) -> str | None:
+        if not value:
+            return None
+        try:
+            return datetime.strptime(str(value), "%Y-%m-%d %H:%M").strftime("%Y-%m-%d %H:%M")
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _normalize_recurrence_unit(value: str) -> str:
+        return value if value in {"none", "day", "workday", "week", "month", "year"} else "none"
+
+    @staticmethod
+    def next_recurrence_date(task_date: str, unit: str, interval: int, today: date | None = None) -> str | None:
+        """Return the next usable occurrence date, keeping late completion practical."""
+        try:
+            current = date.fromisoformat(task_date)
+        except ValueError:
+            return None
+        interval = max(1, int(interval))
+        unit = Database._normalize_recurrence_unit(unit)
+        if unit == "none":
+            return None
+        def advance(value: date) -> date:
+            if unit == "day":
+                return value + timedelta(days=interval)
+            if unit == "workday":
+                result = value
+                remaining = interval
+                while remaining:
+                    result += timedelta(days=1)
+                    if result.weekday() < 5:
+                        remaining -= 1
+                return result
+            if unit == "week":
+                return value + timedelta(weeks=interval)
+            if unit == "month":
+                month_index = value.month - 1 + interval
+                year, month = value.year + month_index // 12, month_index % 12 + 1
+                return date(year, month, min(value.day, monthrange(year, month)[1]))
+            year = value.year + interval
+            return date(year, value.month, min(value.day, monthrange(year, value.month)[1]))
+        result = advance(current)
+        minimum = today or date.today()
+        while result < minimum:
+            result = advance(result)
+        return result.isoformat()
+
+    def create_next_recurrence(self, task_id: int) -> int | None:
+        """Create the next occurrence after the current one is completed."""
+        task = self.task_by_id(task_id)
+        if task is None or not bool(task["is_completed"]):
+            return None
+        next_date = self.next_recurrence_date(
+            task["task_date"], task["recurrence_unit"], task["recurrence_interval"]
+        )
+        if next_date is None:
+            return None
+        reminder_at = task["important_reminder_at"] if "important_reminder_at" in task.keys() else None
+        if reminder_at:
+            try:
+                original_reminder = datetime.strptime(reminder_at, "%Y-%m-%d %H:%M")
+                original_date = date.fromisoformat(task["task_date"])
+                shifted = original_reminder + timedelta(days=(date.fromisoformat(next_date) - original_date).days)
+                reminder_at = shifted.strftime("%Y-%m-%d %H:%M")
+            except ValueError:
+                reminder_at = None
+        return self.add_task(
+            title=task["title"], notes=task["notes"], task_date=next_date, due_time=task["due_time"],
+            is_fixed=bool(task["is_fixed"]), windows_reminder_enabled=bool(task["windows_reminder_enabled"]),
+            important_reminder_offset_minutes=int(task["important_reminder_offset_minutes"] or 0),
+            important_reminder_at=reminder_at,
+            recurrence_unit=task["recurrence_unit"], recurrence_interval=int(task["recurrence_interval"] or 1),
+            content_mode=task["content_mode"] if "content_mode" in task.keys() else "notes",
+        )
 
     def delete_task(self, task_id: int) -> None:
         self.connection.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
@@ -385,7 +480,7 @@ class Database:
             self.connection.execute(
                 """SELECT * FROM tasks
                    WHERE windows_reminder_enabled = 1
-                     AND due_time IS NOT NULL
+                     AND (due_time IS NOT NULL OR important_reminder_at IS NOT NULL)
                      AND is_completed = 0
                      AND deleted_at IS NULL
                    ORDER BY task_date ASC, due_time ASC, created_at ASC"""
@@ -398,15 +493,16 @@ class Database:
             self.connection.execute(
                 """SELECT * FROM tasks
                    WHERE windows_reminder_enabled = 1
-                     AND due_time IS NOT NULL
+                     AND (due_time IS NOT NULL OR important_reminder_at IS NOT NULL)
                      AND is_completed = 0
                      AND important_acknowledged_at IS NULL
                      AND (important_snoozed_until IS NULL OR datetime(important_snoozed_until) <= datetime(?))
                      AND deleted_at IS NULL
-                   AND datetime(
-                         task_date || ' ' || due_time,
-                         '-' || important_reminder_offset_minutes || ' minutes'
-                       ) <= datetime(?)
+                   AND datetime(CASE
+                         WHEN important_reminder_at IS NOT NULL THEN important_reminder_at
+                         ELSE task_date || ' ' || due_time
+                       END, CASE WHEN important_reminder_at IS NOT NULL THEN '+0 minutes'
+                                 ELSE '-' || important_reminder_offset_minutes || ' minutes' END) <= datetime(?)
                    ORDER BY task_date ASC, due_time ASC, created_at ASC""",
                 (now.strftime("%Y-%m-%d %H:%M:%S"), now.strftime("%Y-%m-%d %H:%M:%S")),
             ).fetchall()
@@ -419,35 +515,6 @@ class Database:
             (now, now, task_id),
         )
         self.connection.commit()
-
-    def dismiss_or_repeat_important_reminder(self, task_id: int, now: datetime | None = None) -> bool:
-        """Close an alert, or schedule its configured follow-up reminder.
-
-        Returns True when another reminder was scheduled.  Repetition only
-        begins after the user closes the visible alert; an unattended window
-        already remains on screen and therefore does not need duplicate popups.
-        """
-        task = self.task_by_id(task_id)
-        current = now or datetime.now()
-        if task is None:
-            return False
-        interval = int(task["important_repeat_minutes"] or 0)
-        limit = int(task["important_repeat_limit"] or 0)
-        count = int(task["important_repeat_count"] or 0)
-        if interval > 0 and limit > count:
-            self.connection.execute(
-                "UPDATE tasks SET important_repeat_count = ?, important_snoozed_until = ?, updated_at = ? WHERE id = ?",
-                (
-                    count + 1,
-                    (current + timedelta(minutes=interval)).isoformat(timespec="seconds"),
-                    current.isoformat(timespec="seconds"),
-                    task_id,
-                ),
-            )
-            self.connection.commit()
-            return True
-        self.acknowledge_important_reminder(task_id)
-        return False
 
     def snooze_important_reminder(self, task_id: int, minutes: int, now: datetime | None = None) -> None:
         """Hide one important alert briefly without marking its task complete."""

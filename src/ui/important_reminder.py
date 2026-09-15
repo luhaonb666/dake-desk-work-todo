@@ -128,9 +128,13 @@ class ImportantReminderWindow(QWidget):
             return
         task = self._tasks[self._current_id]
         offset = int(task["important_reminder_offset_minutes"]) if "important_reminder_offset_minutes" in task.keys() else 0
-        self.time_label.setText(
-            f"{task['due_time']} · 提前 {offset} 分钟提醒" if offset else f"{task['due_time']} · 已到提醒时间"
-        )
+        custom_at = task["important_reminder_at"] if "important_reminder_at" in task.keys() else None
+        if custom_at:
+            self.time_label.setText(f"{custom_at} · 自定义提醒")
+        else:
+            self.time_label.setText(
+                f"{task['due_time']} · 提前 {offset} 分钟提醒" if offset else f"{task['due_time']} · 已到提醒时间"
+            )
         self.task_title.setText(str(task["title"]))
         self.notes.setText(str(task["notes"]).strip() or "请在方便时处理这件重要事项。")
         waiting = max(0, len(self._order) - 1)

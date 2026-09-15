@@ -36,6 +36,27 @@ class _StepTextEdit(QPlainTextEdit):
         super().keyPressEvent(event)
 
 
+class CompactStepStartButton(QPushButton):
+    """A compact action that reveals its full explanation on hover."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__("＋ 添加分项步骤", parent)
+        self.setToolTip("将该待办添加分项步骤")
+        self.setStyleSheet(
+            "QPushButton { color:#476b9e; background:#f8fbff; border:1px solid #aec4e5; border-radius:7px; "
+            "padding:4px 8px; font-size:11px; font-weight:600; }"
+            "QPushButton:hover { color:#315b95; background:#edf4ff; border-color:#769bd1; }"
+        )
+
+    def enterEvent(self, event):  # noqa: N802
+        self.setText("将该待办添加分项步骤")
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):  # noqa: N802
+        self.setText("＋ 添加分项步骤")
+        super().leaveEvent(event)
+
+
 class _StepRow(QWidget):
     """One executable step; its detail is intentionally allowed to span lines."""
 
@@ -150,6 +171,7 @@ class TaskStepsEditor(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._loading = False
+        self._external_start_button = False
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -200,6 +222,11 @@ class TaskStepsEditor(QWidget):
             self.add_row()
         else:
             self._refresh_panel()
+
+    def use_external_start_button(self) -> None:
+        """Let a host place the opt-in action beside its content heading."""
+        self._external_start_button = True
+        self._refresh_panel()
 
     def _new_row(self, content: str = "", completed: bool = False) -> _StepRow:
         row = _StepRow(content, completed, self.rows_host)
@@ -291,7 +318,7 @@ class TaskStepsEditor(QWidget):
 
     def _refresh_panel(self) -> None:
         active = bool(self._rows())
-        self.start_button.setVisible(not active)
+        self.start_button.setVisible(not active and not self._external_start_button)
         self.panel.setVisible(active)
         self.updateGeometry()
 
