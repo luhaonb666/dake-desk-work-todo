@@ -9,7 +9,7 @@ from typing import Any, Iterable
 
 
 class Database:
-    SCHEMA_VERSION = 7
+    SCHEMA_VERSION = 8
 
     def __init__(self, path: Path) -> None:
         self.connection = sqlite3.connect(path)
@@ -133,6 +133,15 @@ class Database:
                 "WHERE id IN (SELECT DISTINCT task_id FROM task_steps)"
             )
             version = 7
+        if version < 8:
+            columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(tasks)")}
+            if "important_reminder_offset_minutes" not in columns:
+                # Zero preserves every existing opt-in task as a due-time
+                # reminder while allowing later versions to trigger earlier.
+                self.connection.execute(
+                    "ALTER TABLE tasks ADD COLUMN important_reminder_offset_minutes INTEGER NOT NULL DEFAULT 0"
+                )
+            version = 8
         self.connection.execute(
             "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)",
             (str(version),),
@@ -165,15 +174,18 @@ class Database:
         due_time: str | None,
         is_fixed: bool,
         windows_reminder_enabled: bool = False,
+        important_reminder_offset_minutes: int = 0,
         content_mode: str = "notes",
     ) -> int:
         now = datetime.now().isoformat(timespec="seconds")
         cursor = self.connection.execute(
             """INSERT INTO tasks(
-                   title, notes, task_date, due_time, is_fixed, windows_reminder_enabled, content_mode, created_at, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   title, notes, task_date, due_time, is_fixed, windows_reminder_enabled,
+                   important_reminder_offset_minutes, content_mode, created_at, updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 title, notes, task_date, due_time, int(is_fixed), int(windows_reminder_enabled),
+                max(0, int(important_reminder_offset_minutes)),
                 "steps" if content_mode == "steps" else "notes", now, now,
             ),
         )
@@ -183,11 +195,14 @@ class Database:
     def update_task(self, task_id: int, **fields: Any) -> None:
         allowed = {
             "title", "notes", "task_date", "due_time", "is_fixed", "float_slot", "windows_reminder_enabled",
+            "important_reminder_offset_minutes",
             "content_mode",
         }
         values = {key: value for key, value in fields.items() if key in allowed}
         if "content_mode" in values:
             values["content_mode"] = "steps" if values["content_mode"] == "steps" else "notes"
+        if "important_reminder_offset_minutes" in values:
+            values["important_reminder_offset_minutes"] = max(0, int(values["important_reminder_offset_minutes"]))
         if not values:
             return
         # A rescheduled task is a new reminder schedule. Do not clear alert
@@ -196,6 +211,10 @@ class Database:
         time_changed = current is not None and (
             ("task_date" in values and values["task_date"] != current["task_date"])
             or ("due_time" in values and values["due_time"] != current["due_time"])
+            or (
+                "important_reminder_offset_minutes" in values
+                and values["important_reminder_offset_minutes"] != current["important_reminder_offset_minutes"]
+            )
         )
         if time_changed:
             values["pre_alerted_at"] = None
@@ -365,7 +384,10 @@ class Database:
                      AND important_acknowledged_at IS NULL
                      AND (important_snoozed_until IS NULL OR datetime(important_snoozed_until) <= datetime(?))
                      AND deleted_at IS NULL
-                     AND datetime(task_date || ' ' || due_time) <= datetime(?)
+                   AND datetime(
+                         task_date || ' ' || due_time,
+                         '-' || important_reminder_offset_minutes || ' minutes'
+                       ) <= datetime(?)
                    ORDER BY task_date ASC, due_time ASC, created_at ASC""",
                 (now.strftime("%Y-%m-%d %H:%M:%S"), now.strftime("%Y-%m-%d %H:%M:%S")),
             ).fetchall()

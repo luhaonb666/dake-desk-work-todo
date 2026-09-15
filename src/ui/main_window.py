@@ -32,7 +32,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.5.8"
+APP_VERSION = "4.6"
 
 
 def app_icon() -> QIcon:
@@ -270,10 +270,19 @@ class TaskCard(QFrame):
             if task["is_completed"] else "font-size:15px; font-weight:500; color:#26313e;"
         )
         content.addWidget(title)
+        completed_steps, total_steps = step_summary
+        if total_steps:
+            steps_preview = ExpandableStepsPreview(task_steps)
+            if workspace_mode:
+                steps_preview.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            content.addWidget(steps_preview)
         if task["notes"]:
             notes = ExpandableNotesWidget(
                 task["notes"],
-                max_visible_lines=8 if workspace_mode else ExpandableNotesWidget.MAX_VISIBLE_LINES,
+                # Once a task has steps, the steps are the visible working
+                # path. Keep the preserved body as only a one-and-a-half-line
+                # preview below it instead of repeating it above the steps.
+                max_visible_lines=(1 if total_steps else (8 if workspace_mode else ExpandableNotesWidget.MAX_VISIBLE_LINES)),
                 expandable=not workspace_mode,
                 collapsed_hint="更多内容请在右侧查看" if workspace_mode else "↓ 点击展开完整说明",
             )
@@ -282,12 +291,6 @@ class TaskCard(QFrame):
                 # must not consume the click that opens the right-side editor.
                 notes.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             content.addWidget(notes)
-        completed_steps, total_steps = step_summary
-        if total_steps:
-            steps_preview = ExpandableStepsPreview(task_steps)
-            if workspace_mode:
-                steps_preview.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-            content.addWidget(steps_preview)
         if overdue:
             warning = QLabel("已超时")
             warning.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -1151,6 +1154,10 @@ class MainWindow(QMainWindow):
             due_time=task["due_time"],
             is_fixed=bool(task["is_fixed"]),
             windows_reminder_enabled=bool(task["windows_reminder_enabled"]),
+            important_reminder_offset_minutes=(
+                int(task["important_reminder_offset_minutes"])
+                if "important_reminder_offset_minutes" in task.keys() else 0
+            ),
             content_mode=task["content_mode"] if "content_mode" in task.keys() else "notes",
         )
         self.db.replace_task_steps(copied_id, [

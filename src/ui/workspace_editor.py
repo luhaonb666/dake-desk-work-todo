@@ -129,14 +129,44 @@ class WorkspaceEditor(QWidget):
         time_row.addWidget(self.minute_combo)
         time_row.addStretch()
 
-        self.windows_reminder_check = QCheckBox("重要事项：准点强提醒（需手动关闭）")
-        self.windows_reminder_check.setObjectName("windowsReminderCheck")
-        self.windows_reminder_check.setToolTip("先勾选“有具体时间”后可启用。软件会弹出置顶提醒，Windows 通知可用时会作为额外提醒。")
-        self.windows_reminder_check.setStyleSheet(
-            "QCheckBox#windowsReminderCheck { color:#2458bf; font-weight:600; padding:5px 7px 5px 0; "
-            "border:1px solid #b9ccff; border-radius:8px; background:#eef4ff; }"
+        self.windows_reminder_box = QFrame()
+        self.windows_reminder_box.setObjectName("windowsReminderBox")
+        self.windows_reminder_box.setStyleSheet(
+            "QFrame#windowsReminderBox { border:1px solid #d5e0ef; border-radius:8px; background:#fafcff; }"
         )
+        reminder_layout = QVBoxLayout(self.windows_reminder_box)
+        reminder_layout.setContentsMargins(9, 7, 9, 7)
+        reminder_layout.setSpacing(5)
+        reminder_title = QLabel("重要提醒")
+        reminder_title.setStyleSheet("font-size:12px; color:#46627f; font-weight:600;")
+        reminder_layout.addWidget(reminder_title)
+        self.reminder_mode_combo = NoWheelComboBox()
+        self.reminder_mode_combo.addItem("不设置重要提醒", False)
+        self.reminder_mode_combo.addItem("软件置顶强提醒", True)
+        self.reminder_mode_combo.setToolTip("强提醒会显示在右下角，可关闭或选择稍后提醒。")
+        reminder_mode_row = QHBoxLayout()
+        reminder_mode_row.setContentsMargins(0, 0, 0, 0)
+        reminder_mode_row.addWidget(QLabel("提醒方式"))
+        reminder_mode_row.addWidget(self.reminder_mode_combo, 1)
+        reminder_layout.addLayout(reminder_mode_row)
+        self.reminder_timing_combo = NoWheelComboBox()
+        for label, minutes in (
+            ("事项时间：准点提醒", 0),
+            ("事项时间前 10 分钟", 10),
+            ("事项时间前 30 分钟", 30),
+            ("事项时间前 1 小时", 60),
+        ):
+            self.reminder_timing_combo.addItem(label, minutes)
+        self.reminder_timing_combo.setToolTip("选择何时显示软件内强提醒；事项本身的日期和时间不会改变。")
+        reminder_time_row = QHBoxLayout()
+        reminder_time_row.setContentsMargins(0, 0, 0, 0)
+        reminder_time_row.addWidget(QLabel("提醒时间"))
+        reminder_time_row.addWidget(self.reminder_timing_combo, 1)
+        reminder_layout.addLayout(reminder_time_row)
         self.time_enabled.toggled.connect(self._sync_windows_reminder_availability)
+        self.reminder_mode_combo.currentIndexChanged.connect(
+            lambda _index: self._sync_windows_reminder_availability(self.time_enabled.isChecked())
+        )
         self.fixed_check = QCheckBox("固定锁住待办（显示在当天列表最底部）")
 
         form.addWidget(self.title_edit)
@@ -155,7 +185,7 @@ class WorkspaceEditor(QWidget):
         # This important, optional reminder is deliberately last: it starts on
         # the same left axis as the time controls, but is visually separated
         # from ordinary scheduling choices.
-        form.addWidget(self.windows_reminder_check)
+        form.addWidget(self.windows_reminder_box)
         self.operation_divider = QFrame()
         self.operation_divider.setFrameShape(QFrame.Shape.HLine)
         self.operation_divider.setStyleSheet("color:#dbe4ee; margin:13px 0 7px;")
@@ -205,14 +235,16 @@ class WorkspaceEditor(QWidget):
         self.time_enabled.toggled.connect(self._refresh_status)
         self.hour_combo.currentIndexChanged.connect(self._refresh_status)
         self.minute_combo.currentIndexChanged.connect(self._refresh_status)
-        self.windows_reminder_check.toggled.connect(self._refresh_status)
+        self.reminder_mode_combo.currentIndexChanged.connect(self._refresh_status)
+        self.reminder_timing_combo.currentIndexChanged.connect(self._refresh_status)
         self.fixed_check.toggled.connect(self._refresh_status)
         self.clear()
 
     def _sync_windows_reminder_availability(self, enabled: bool) -> None:
-        self.windows_reminder_check.setEnabled(enabled)
+        self.reminder_mode_combo.setEnabled(enabled)
         if not enabled:
-            self.windows_reminder_check.setChecked(False)
+            self.reminder_mode_combo.setCurrentIndex(0)
+        self.reminder_timing_combo.setEnabled(enabled and bool(self.reminder_mode_combo.currentData()))
 
     def detach_action_bar(self) -> QWidget:
         """Move Save controls outside the editor scroll area and keep them visible."""
@@ -294,7 +326,8 @@ class WorkspaceEditor(QWidget):
         self.title_edit.clear()
         self.notes_edit.clear()
         self.time_enabled.setChecked(False)
-        self.windows_reminder_check.setChecked(False)
+        self.reminder_mode_combo.setCurrentIndex(0)
+        self.reminder_timing_combo.setCurrentIndex(0)
         self._sync_windows_reminder_availability(False)
         self.fixed_check.setChecked(False)
         self.steps_editor.set_steps([])
@@ -337,7 +370,10 @@ class WorkspaceEditor(QWidget):
                 index = self.minute_combo.count() - 1
             self.minute_combo.setCurrentIndex(index)
         supports_reminder = "windows_reminder_enabled" in task.keys()
-        self.windows_reminder_check.setChecked(bool(supports_reminder and task["windows_reminder_enabled"]))
+        reminder_enabled = bool(supports_reminder and task["windows_reminder_enabled"])
+        offset = int(task["important_reminder_offset_minutes"]) if "important_reminder_offset_minutes" in task.keys() else 0
+        self.reminder_mode_combo.setCurrentIndex(1 if reminder_enabled else 0)
+        self.reminder_timing_combo.setCurrentIndex(max(0, self.reminder_timing_combo.findData(offset)))
         self._sync_windows_reminder_availability(bool(due))
         self.fixed_check.setChecked(bool(task["is_fixed"]))
         self._loading = False
@@ -366,7 +402,11 @@ class WorkspaceEditor(QWidget):
             "task_date": self.date_edit.date().toString("yyyy-MM-dd"),
             "due_time": due_time,
             "is_fixed": self.fixed_check.isChecked(),
-            "windows_reminder_enabled": bool(due_time) and self.windows_reminder_check.isChecked(),
+            "windows_reminder_enabled": bool(due_time) and bool(self.reminder_mode_combo.currentData()),
+            "important_reminder_offset_minutes": (
+                int(self.reminder_timing_combo.currentData())
+                if due_time and self.reminder_mode_combo.currentData() else 0
+            ),
             "steps": self.steps_editor.values(),
             "content_mode": "notes",
         }
@@ -387,7 +427,10 @@ class WorkspaceEditor(QWidget):
             hour, minute = values["due_time"].split(":", 1)
             self.hour_combo.setCurrentIndex(max(0, self.hour_combo.findData(int(hour))))
             self.minute_combo.setCurrentIndex(max(0, self.minute_combo.findData(int(minute))))
-        self.windows_reminder_check.setChecked(values["windows_reminder_enabled"])
+        self.reminder_mode_combo.setCurrentIndex(1 if values["windows_reminder_enabled"] else 0)
+        self.reminder_timing_combo.setCurrentIndex(
+            max(0, self.reminder_timing_combo.findData(values.get("important_reminder_offset_minutes", 0)))
+        )
         self._sync_windows_reminder_availability(bool(values["due_time"]))
         self.fixed_check.setChecked(values["is_fixed"])
         self.steps_editor.set_steps(values.get("steps", []))

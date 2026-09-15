@@ -1,4 +1,4 @@
-"""Focused V4.5.8 regression checks for settings, reminders, and task views."""
+"""Focused V4.6 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from ui.main_window import ExpandableNotesWidget, ExpandableStepsPreview, FadedP
 from ui.float_window import FloatCard, FloatWindow
 from ui.controls import CompactDatePicker, normalize_note_text
 from ui.desktop_note import DesktopNoteWindow
+from ui.important_reminder import ImportantReminderWindow
 from ui.settings_dialog import GuidedTimeCombo, SettingsDialog
 from ui.task_dialog import PlainNotesEditor, TaskDialog
 from ui.task_steps import TaskStepsEditor
@@ -326,10 +327,10 @@ class V200Tests(unittest.TestCase):
 
     def test_windows_reminder_choice_stays_visible_until_time_is_selected(self) -> None:
         dialog = TaskDialog()
-        self.assertFalse(dialog.windows_reminder_check.isHidden())
-        self.assertFalse(dialog.windows_reminder_check.isEnabled())
+        self.assertFalse(dialog.reminder_mode_combo.isHidden())
+        self.assertFalse(dialog.reminder_mode_combo.isEnabled())
         dialog.time_enabled.setChecked(True)
-        self.assertTrue(dialog.windows_reminder_check.isEnabled())
+        self.assertTrue(dialog.reminder_mode_combo.isEnabled())
 
     def test_settings_dirty_state_and_no_wheel_controls(self) -> None:
         dialog = SettingsDialog(self.db, list(MainWindow.DEFAULT_GREETINGS))
@@ -493,19 +494,17 @@ class V200Tests(unittest.TestCase):
         self.assertEqual(dialog.notes_edit.toPlainText(), task["notes"])
         self.assertEqual(dialog.values()["notes"], task["notes"])
 
-    def test_windows_system_reminder_is_opt_in_and_requires_a_time(self) -> None:
+    def test_important_reminder_selection_is_opt_in_and_requires_a_time(self) -> None:
         dialog = TaskDialog()
-        # The choice stays visible as an explicit important-task feature; it is
-        # simply unavailable until a concrete reminder time is chosen.
-        self.assertFalse(dialog.windows_reminder_check.isHidden())
-        self.assertFalse(dialog.windows_reminder_check.isEnabled())
-        self.assertFalse(dialog.windows_reminder_check.isChecked())
+        self.assertFalse(dialog.reminder_mode_combo.isHidden())
+        self.assertFalse(dialog.reminder_mode_combo.isEnabled())
+        self.assertFalse(bool(dialog.reminder_mode_combo.currentData()))
         dialog.time_enabled.setChecked(True)
-        self.assertFalse(dialog.windows_reminder_check.isHidden())
-        self.assertTrue(dialog.windows_reminder_check.isEnabled())
-        self.assertFalse(dialog.windows_reminder_check.isChecked())
-        dialog.windows_reminder_check.setChecked(True)
+        self.assertTrue(dialog.reminder_mode_combo.isEnabled())
+        dialog.reminder_mode_combo.setCurrentIndex(1)
+        dialog.reminder_timing_combo.setCurrentIndex(dialog.reminder_timing_combo.findData(30))
         self.assertTrue(dialog.values()["windows_reminder_enabled"])
+        self.assertEqual(dialog.values()["important_reminder_offset_minutes"], 30)
         dialog.time_enabled.setChecked(False)
         self.assertFalse(dialog.values()["windows_reminder_enabled"])
 
@@ -518,6 +517,24 @@ class V200Tests(unittest.TestCase):
             datetime(2026, 9, 1, 9, 30),
         )
         self.assertEqual([(item.task_id, item.title, item.due_time) for item in plan], [(enabled, "重要会议", "10:00")])
+
+    def test_important_reminder_can_trigger_before_the_task_time(self) -> None:
+        task_id = self.db.add_task(
+            "合同提醒", "", "2026-09-01", "10:00", False, True,
+            important_reminder_offset_minutes=30,
+        )
+        pending = self.db.pending_important_reminder_tasks(datetime(2026, 9, 1, 9, 30))
+        self.assertEqual([task["id"] for task in pending], [task_id])
+
+    def test_early_important_reminder_explains_that_it_is_early(self) -> None:
+        task_id = self.db.add_task(
+            "合同提醒", "", "2026-09-01", "10:00", False, True,
+            important_reminder_offset_minutes=30,
+        )
+        reminder = ImportantReminderWindow()
+        reminder.sync_tasks([self.db.task_by_id(task_id)])
+        self.assertIn("提前 30 分钟", reminder.time_label.text())
+        reminder.hide()
 
     def test_important_reminder_waits_for_manual_acknowledgement(self) -> None:
         important = self.db.add_task("签合同", "等对方确认", "2026-09-01", "10:00", False, True)

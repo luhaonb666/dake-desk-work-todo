@@ -158,37 +158,45 @@ class TaskDialog(QDialog):
 
         self.time_enabled = QCheckBox("有具体时间")
         self.time_enabled.setChecked(bool(task and task["due_time"]))
-        # Keep the visible square in its own fixed-width control.  A normal
-        # text-bearing QCheckBox retains platform-specific inner margins, which
-        # made this indicator appear several pixels right of the other options.
-        self.windows_reminder_check = QCheckBox()
-        self.windows_reminder_check.setObjectName("windowsReminderIndicator")
-        self.windows_reminder_check.setFixedSize(18, 18)
         task_supports_system_reminder = bool(task and "windows_reminder_enabled" in task.keys())
-        self.windows_reminder_check.setChecked(
-            bool(task and task_supports_system_reminder and task["windows_reminder_enabled"])
-        )
-        self.windows_reminder_check.setToolTip(
-            "默认关闭。勾选后，到准点会显示软件内的置顶强提醒；Windows 通知可用时会作为额外提醒。"
-        )
-        self.windows_reminder_check.setStyleSheet(
-            "QCheckBox#windowsReminderIndicator { padding:0; margin:0; border:none; background:transparent; }"
-            "QCheckBox#windowsReminderIndicator::indicator { width:17px; height:17px; margin:0; }"
-        )
-        self.windows_reminder_label = QLabel("重要事项：准点强提醒（需手动关闭）")
-        self.windows_reminder_label.setStyleSheet("color:#0659c9; font-weight:600; background:transparent;")
-        self.windows_reminder_label.setToolTip(self.windows_reminder_check.toolTip())
+        reminder_enabled = bool(task and task_supports_system_reminder and task["windows_reminder_enabled"])
+        reminder_offset = int(task["important_reminder_offset_minutes"]) if task and "important_reminder_offset_minutes" in task.keys() else 0
+        self.reminder_mode_combo = NoWheelComboBox()
+        self.reminder_mode_combo.addItem("不设置重要提醒", False)
+        self.reminder_mode_combo.addItem("软件置顶强提醒", True)
+        self.reminder_mode_combo.setCurrentIndex(1 if reminder_enabled else 0)
+        self.reminder_mode_combo.setToolTip("强提醒会显示在右下角，可关闭或选择稍后提醒。")
+        self.reminder_timing_combo = NoWheelComboBox()
+        for label, minutes in (
+            ("事项时间：准点提醒", 0),
+            ("事项时间前 10 分钟", 10),
+            ("事项时间前 30 分钟", 30),
+            ("事项时间前 1 小时", 60),
+        ):
+            self.reminder_timing_combo.addItem(label, minutes)
+        self.reminder_timing_combo.setCurrentIndex(max(0, self.reminder_timing_combo.findData(reminder_offset)))
+        self.reminder_timing_combo.setToolTip("选择何时显示软件内强提醒；事项本身的日期和时间不会改变。")
         self.windows_reminder_box = QFrame()
         self.windows_reminder_box.setObjectName("windowsReminderBox")
         self.windows_reminder_box.setStyleSheet(
-            "QFrame#windowsReminderBox { border:1px solid #b9ccff; border-radius:8px; background:#eef4ff; }"
+            "QFrame#windowsReminderBox { border:1px solid #d5e0ef; border-radius:8px; background:#fafcff; }"
         )
-        reminder_layout = QHBoxLayout(self.windows_reminder_box)
-        reminder_layout.setContentsMargins(0, 5, 7, 5)
-        reminder_layout.setSpacing(8)
-        reminder_layout.addWidget(self.windows_reminder_check)
-        reminder_layout.addWidget(self.windows_reminder_label)
-        reminder_layout.addStretch()
+        reminder_layout = QVBoxLayout(self.windows_reminder_box)
+        reminder_layout.setContentsMargins(10, 7, 10, 7)
+        reminder_layout.setSpacing(5)
+        reminder_title = QLabel("重要提醒")
+        reminder_title.setStyleSheet("color:#46627f; font-weight:600; background:transparent;")
+        reminder_layout.addWidget(reminder_title)
+        reminder_mode_row = QHBoxLayout()
+        reminder_mode_row.setContentsMargins(0, 0, 0, 0)
+        reminder_mode_row.addWidget(QLabel("提醒方式"))
+        reminder_mode_row.addWidget(self.reminder_mode_combo, 1)
+        reminder_layout.addLayout(reminder_mode_row)
+        reminder_time_row = QHBoxLayout()
+        reminder_time_row.setContentsMargins(0, 0, 0, 0)
+        reminder_time_row.addWidget(QLabel("提醒时间"))
+        reminder_time_row.addWidget(self.reminder_timing_combo, 1)
+        reminder_layout.addLayout(reminder_time_row)
         self.hour_combo = NoWheelComboBox()
         for hour in TIME_HOURS:
             self.hour_combo.addItem(f"{hour:02d} 时", hour)
@@ -219,6 +227,9 @@ class TaskDialog(QDialog):
         time_box.addStretch()
         self._sync_windows_reminder_availability(self.time_enabled.isChecked())
         self.time_enabled.toggled.connect(self._sync_windows_reminder_availability)
+        self.reminder_mode_combo.currentIndexChanged.connect(
+            lambda _index: self._sync_windows_reminder_availability(self.time_enabled.isChecked())
+        )
 
         self.fixed_check = QCheckBox("固定锁住待办（显示在当天列表最底部）")
         self.fixed_check.setChecked(bool(task and task["is_fixed"]))
@@ -282,17 +293,21 @@ class TaskDialog(QDialog):
             "task_date": self.date_edit.date().toString("yyyy-MM-dd"),
             "due_time": due_time,
             "is_fixed": self.fixed_check.isChecked(),
-            "windows_reminder_enabled": bool(due_time) and self.windows_reminder_check.isChecked(),
+            "windows_reminder_enabled": bool(due_time) and bool(self.reminder_mode_combo.currentData()),
+            "important_reminder_offset_minutes": (
+                int(self.reminder_timing_combo.currentData())
+                if due_time and self.reminder_mode_combo.currentData() else 0
+            ),
             "steps": self.steps_editor.values(),
             "content_mode": "notes",
         }
 
     def _sync_windows_reminder_availability(self, enabled: bool) -> None:
-        """Keep the important-reminder choice visible and explain its prerequisite."""
-        self.windows_reminder_check.setEnabled(enabled)
-        self.windows_reminder_label.setEnabled(enabled)
+        """Keep reminder choices tied to a real task date and time."""
+        self.reminder_mode_combo.setEnabled(enabled)
         if not enabled:
-            self.windows_reminder_check.setChecked(False)
+            self.reminder_mode_combo.setCurrentIndex(0)
+        self.reminder_timing_combo.setEnabled(enabled and bool(self.reminder_mode_combo.currentData()))
 
     def duplicate_requested(self) -> bool:
         return self._duplicate_requested
