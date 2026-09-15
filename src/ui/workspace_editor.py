@@ -54,12 +54,13 @@ class WorkspaceEditor(QWidget):
         self.title_edit.setFixedHeight(76)
         self.title_edit.setPlaceholderText("事项标题（最多两行）")
         self.title_edit.setToolTip("事项标题最多两行；Enter 转到具体内容；Shift + Enter 可换行。")
-        self.title_edit.next_field_requested.connect(self.notes_edit.setFocus)
 
         self.notes_edit = PlainNotesEditor()
         self.notes_edit.setPlaceholderText("具体事项、材料或下一步")
         self.notes_edit.setMinimumHeight(380)
         self.notes_edit.setAcceptRichText(False)
+        # The target must exist before TitleEditor can wire Enter to it.
+        self.title_edit.next_field_requested.connect(self.notes_edit.setFocus)
         self.steps_editor = TaskStepsEditor()
         self.import_steps_button = QPushButton("将具体内容按换行添加为步骤")
         self.import_steps_button.setObjectName("quietButton")

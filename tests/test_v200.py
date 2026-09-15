@@ -582,6 +582,12 @@ class V200Tests(unittest.TestCase):
         self.assertIsNotNone(note.drag_handle)
         note.deleteLater()
 
+    def test_v452_workspace_editor_creates_the_note_target_before_connecting(self) -> None:
+        editor = WorkspaceEditor()
+        self.assertIsNotNone(editor.notes_edit)
+        self.assertIsNotNone(editor.title_edit)
+        editor.deleteLater()
+
     def test_v452_content_mode_preserves_compatibility_for_existing_tasks(self) -> None:
         task_id = self.db.add_task(
             "完成报价", "", "2026-09-01", None, False, content_mode="steps"
