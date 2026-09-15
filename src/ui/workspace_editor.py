@@ -156,25 +156,25 @@ class WorkspaceEditor(QWidget):
         # the same left axis as the time controls, but is visually separated
         # from ordinary scheduling choices.
         form.addWidget(self.windows_reminder_check)
-        operation_divider = QFrame()
-        operation_divider.setFrameShape(QFrame.Shape.HLine)
-        operation_divider.setStyleSheet("color:#dbe4ee; margin:13px 0 7px;")
-        form.addWidget(operation_divider)
-        operations_label = QLabel("事项操作")
-        operations_label.setStyleSheet("font-size:12px; color:#718096; font-weight:600; padding:0 0 5px;")
-        form.addWidget(operations_label)
-        self.duplicate_button = QPushButton("复制为新事项")
+        self.operation_divider = QFrame()
+        self.operation_divider.setFrameShape(QFrame.Shape.HLine)
+        self.operation_divider.setStyleSheet("color:#dbe4ee; margin:13px 0 7px;")
+        form.addWidget(self.operation_divider)
+        self.operations_label = QLabel("事项操作")
+        self.operations_label.setStyleSheet("font-size:12px; color:#718096; font-weight:600; padding:0 0 5px;")
+        form.addWidget(self.operations_label)
+        self.duplicate_button = QPushButton("新建为后续事项")
         self.duplicate_button.setObjectName("quietButton")
-        self.duplicate_button.setToolTip("保留原事项，并新建一条可单独修改的副本。")
+        self.duplicate_button.setToolTip("保留当前事项，并新建一条可继续处理的后续事项。")
         self.duplicate_button.clicked.connect(self._emit_duplicate)
-        self.duplicate_hint = QLabel("保留原事项；副本的分项步骤会从未完成开始。")
+        self.duplicate_hint = QLabel("保留当前记录，并新建一条今天的后续事项。")
         self.duplicate_hint.setWordWrap(True)
         self.duplicate_hint.setStyleSheet("font-size:11px; color:#8793a2; padding:2px 3px 5px;")
-        self.move_today_button = QPushButton("移到今天")
+        self.move_today_button = QPushButton("安排到今天继续处理")
         self.move_today_button.setObjectName("quietButton")
         self.move_today_button.setToolTip("直接把原事项改期到今天，不会新建副本。")
         self.move_today_button.clicked.connect(self._emit_move_today)
-        self.move_today_hint = QLabel("直接改原事项日期；若要保留旧事项，请使用“复制为新事项”。")
+        self.move_today_hint = QLabel("直接把原事项日期改为今天，不会新建副本。")
         self.move_today_hint.setWordWrap(True)
         self.move_today_hint.setStyleSheet("font-size:11px; color:#8793a2; padding:2px 3px 4px;")
         form.addWidget(self.duplicate_button)
@@ -236,10 +236,11 @@ class WorkspaceEditor(QWidget):
             self.set_status_message("已保存")
         can_copy = self._task_id is not None and not self.is_dirty()
         self.duplicate_button.setEnabled(can_copy)
-        self.duplicate_hint.setText(
-            "保留原事项；副本的分项步骤会从未完成开始。"
-            if can_copy else "请先保存当前修改后再复制，避免复制到未保存的内容。"
-        )
+        if self._task_is_previous:
+            self.duplicate_hint.setText(
+                "保留当前记录，并新建一条今天的后续事项。"
+                if can_copy else "请先保存当前修改后，再选择继续处理方式。"
+            )
 
     def _on_notes_changed(self) -> None:
         self._refresh_import_button()
@@ -303,6 +304,10 @@ class WorkspaceEditor(QWidget):
         self.restore_button.setEnabled(False)
         self.save_button.setEnabled(False)
         self.duplicate_button.setEnabled(False)
+        self.operation_divider.setVisible(False)
+        self.operations_label.setVisible(False)
+        self.duplicate_button.setVisible(False)
+        self.duplicate_hint.setVisible(False)
         self.move_today_button.setVisible(False)
         self.move_today_hint.setVisible(False)
         self._refresh_import_button()
@@ -341,8 +346,13 @@ class WorkspaceEditor(QWidget):
         self.form_host.setEnabled(True)
         self.restore_button.setEnabled(True)
         self.save_button.setEnabled(True)
+        self.operation_divider.setVisible(True)
+        self.operations_label.setVisible(True)
+        self.duplicate_button.setVisible(True)
+        self.duplicate_hint.setVisible(self._task_is_previous)
         self.move_today_button.setVisible(self._task_is_previous)
         self.move_today_hint.setVisible(self._task_is_previous)
+        self.operations_label.setText("继续处理方式" if self._task_is_previous else "事项操作")
         self._baseline = self.values()
         self._refresh_status()
 

@@ -25,13 +25,14 @@ from ui.desktop_note import DesktopNoteDialog, DesktopNoteWindow
 from ui.float_window import FloatBadge, FloatWindow
 from ui.important_reminder import ImportantReminderWindow
 from ui.settings_dialog import SettingsDialog
+from ui.step_preview_line import ElidedStepPreviewLine
 from ui.task_dialog import TaskDialog
 from ui.theme import APP_STYLE, TASK_CARD_COLORS
 from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.5.7"
+APP_VERSION = "4.5.8"
 
 
 def app_icon() -> QIcon:
@@ -182,12 +183,12 @@ class ExpandableStepsPreview(QWidget):
 
     @staticmethod
     def _summary(step: dict) -> str:
-        lines = step["content"].splitlines()
-        first_line = lines[0] if lines else ""
-        remaining = max(0, len(lines) - 1)
-        suffix = f"（还有 {remaining} 行）" if remaining else ""
+        lines = [line.strip() for line in step["content"].splitlines() if line.strip()]
+        # One step remains one preview row. Its own extra lines are compacted
+        # with enumeration commas instead of adding another card line.
+        summary = "、".join(lines)
         marker = "✓" if step["is_completed"] else "·"
-        return f"{marker} {first_line}{suffix}"
+        return f"{marker} {summary}"
 
     def _clear_rows(self) -> None:
         while self.rows_layout.count():
@@ -199,9 +200,8 @@ class ExpandableStepsPreview(QWidget):
         self._clear_rows()
         visible_steps = self._steps if not self._collapsed else self._steps[:self.MAX_VISIBLE_STEPS]
         for step in visible_steps:
-            label = QLabel(self._summary(step))
+            label = ElidedStepPreviewLine(self._summary(step))
             label.setTextFormat(Qt.TextFormat.PlainText)
-            label.setWordWrap(True)
             label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             color = "#82906f" if step["is_completed"] else "#6f7e91"
             label.setStyleSheet(f"font-size:11px; color:{color}; padding-left:42px;")
@@ -296,13 +296,13 @@ class TaskCard(QFrame):
         layout.addLayout(content, 1)
         actions = [] if workspace_mode else [("编辑", lambda: on_edit(task))]
         if on_move_today:
-            actions.append(("移到今天", lambda: on_move_today(task)))
+            actions.append(("安排到今天继续处理", lambda: on_move_today(task)))
         actions.extend([("浮窗重点位", lambda: on_float(task)), ("删除", lambda: on_delete(task))])
         for text, callback in actions:
             button = QPushButton(text)
             button.setObjectName("quietButton")
-            if text == "移到今天":
-                button.setToolTip("直接把原事项改到今天；若要保留原事项，请使用“新增复制该条事项”。")
+            if text == "安排到今天继续处理":
+                button.setToolTip("直接把原事项日期改为今天，不会新建副本。")
             button.clicked.connect(callback)
             layout.addWidget(button, 0, Qt.AlignmentFlag.AlignTop)
 
@@ -1143,10 +1143,11 @@ class MainWindow(QMainWindow):
         task = self.db.task_by_id(task_id)
         if task is None:
             return
+        task_date = self.db.today() if task["task_date"] < self.db.today() else task["task_date"]
         copied_id = self.db.add_task(
             title=task["title"],
             notes=task["notes"],
-            task_date=task["task_date"],
+            task_date=task_date,
             due_time=task["due_time"],
             is_fixed=bool(task["is_fixed"]),
             windows_reminder_enabled=bool(task["windows_reminder_enabled"]),
@@ -1157,7 +1158,7 @@ class MainWindow(QMainWindow):
             for step in self.db.task_steps(task_id)
         ])
         self.workspace_selected_task_id = copied_id
-        self.show_notice("已复制为新事项：原事项保留，副本可单独修改。")
+        self.show_notice("已新建为后续事项：原事项保留，新事项可单独继续处理。")
         self.render()
 
     def move_workspace_task_to_today(self, task_id: int) -> None:
@@ -1442,7 +1443,7 @@ class MainWindow(QMainWindow):
             "windows_reminder_enabled": bool(task["windows_reminder_enabled"]),
         })
         self._sync_windows_reminders()
-        self.show_notice("已移到今天：这是原事项改期，不会新建副本。")
+        self.show_notice("已安排到今天继续处理：原事项日期已改为今天，未新建副本。")
         if self.workspace_selected_task_id == task_id:
             self.workspace_editor.load_task(self.db.task_by_id(task_id), self.db.task_steps(task_id))
         self.render()

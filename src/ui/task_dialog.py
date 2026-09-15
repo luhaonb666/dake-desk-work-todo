@@ -79,6 +79,7 @@ class TaskDialog(QDialog):
     def __init__(self, task=None, parent=None, *, task_steps=None) -> None:
         super().__init__(parent)
         self.task = task
+        self._duplicate_requested = False
         self.setObjectName("taskDialog")
         self.setWindowTitle("编辑事项" if task else "添加事项")
         self.setMinimumWidth(470)
@@ -221,22 +222,12 @@ class TaskDialog(QDialog):
 
         self.fixed_check = QCheckBox("固定锁住待办（显示在当天列表最底部）")
         self.fixed_check.setChecked(bool(task and task["is_fixed"]))
-        self.duplicate_check = QCheckBox("新增复制该条事项（保留原事项）")
-        self.duplicate_check.setToolTip("复制会保留原事项并新建一条；若只是把旧事项改到今天，请在“之前未完成”中选择“移到今天”。")
-        self.duplicate_check.setVisible(bool(task))
-        self.duplicate_hint = QLabel("复制会保留原事项；旧事项只是改到今天，请在“之前未完成”中点“移到今天”。")
-        self.duplicate_hint.setWordWrap(True)
-        self.duplicate_hint.setStyleSheet("font-size:11px; color:#8793a2; padding-left:4px;")
-        self.duplicate_hint.setVisible(bool(task))
         form.addRow("事项标题", title_box)
         form.addRow("", self.steps_editor)
         form.addRow("具体内容", self.notes_section)
         form.addRow("日期", self.date_edit)
         form.addRow("时间", time_box)
         form.addRow("", self.fixed_check)
-        if task:
-            form.addRow("", self.duplicate_check)
-            form.addRow("", self.duplicate_hint)
         divider = QFrame()
         divider.setFrameShape(QFrame.Shape.HLine)
         divider.setStyleSheet("color:#dbe4ee; margin:13px 0 8px;")
@@ -249,6 +240,12 @@ class TaskDialog(QDialog):
         buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存")
         buttons.button(QDialogButtonBox.StandardButton.Save).setObjectName("primaryButton")
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        self.follow_up_button = QPushButton("新建为后续事项")
+        self.follow_up_button.setObjectName("quietButton")
+        self.follow_up_button.setToolTip("保留当前事项，并按当前内容新建一条可继续处理的后续事项。")
+        self.follow_up_button.setVisible(bool(task))
+        self.follow_up_button.clicked.connect(self._accept_as_follow_up)
+        buttons.addButton(self.follow_up_button, QDialogButtonBox.ButtonRole.ActionRole)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -298,9 +295,28 @@ class TaskDialog(QDialog):
             self.windows_reminder_check.setChecked(False)
 
     def duplicate_requested(self) -> bool:
-        return not self.duplicate_check.isHidden() and self.duplicate_check.isChecked()
+        return self._duplicate_requested
+
+    def _accept_as_follow_up(self) -> None:
+        """Confirm the non-destructive path before turning Save into a copy."""
+        if not self.title_edit.toPlainText().strip():
+            self.title_edit.setFocus()
+            return
+        answer = QMessageBox.question(
+            self,
+            "新建为后续事项",
+            "将保留当前事项，并新建一条相同内容的后续事项。\n新事项可单独继续修改，分项步骤会从未完成开始。",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._duplicate_requested = True
+        self._accept_current_values()
 
     def accept(self) -> None:
+        self._duplicate_requested = False
+        self._accept_current_values()
+
+    def _accept_current_values(self) -> None:
         if not self.title_edit.toPlainText().strip():
             self.title_edit.setFocus()
             return

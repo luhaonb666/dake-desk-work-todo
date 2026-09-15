@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QTimer, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox, QFrame, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
@@ -100,6 +100,11 @@ class _StepRow(QWidget):
         self._editing = focused
         self._refresh_focus_border(focused)
         self._refresh_height()
+        if not focused:
+            # QTextDocument completes line layout after focus processing on
+            # some platform styles. Recheck once that finishes so a genuine
+            # two-line step cannot collapse to one scrollable line.
+            QTimer.singleShot(0, self._refresh_height)
 
     def _refresh_focus_border(self, focused: bool) -> None:
         color = "#7f9cf1" if focused else "#d8e1ee"

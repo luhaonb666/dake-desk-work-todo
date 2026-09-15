@@ -1,4 +1,4 @@
-"""Focused V4.5.7 regression checks for settings, reminders, and task views."""
+"""Focused V4.5.8 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -284,9 +284,9 @@ class V200Tests(unittest.TestCase):
             "title": "做合同", "notes": "", "task_date": "2026-09-01",
             "due_time": "09:00", "is_fixed": 0,
         })
-        self.assertFalse(dialog.duplicate_check.isHidden())
-        dialog.duplicate_check.setChecked(True)
-        self.assertTrue(dialog.duplicate_requested())
+        self.assertFalse(dialog.follow_up_button.isHidden())
+        self.assertEqual(dialog.follow_up_button.text(), "新建为后续事项")
+        self.assertFalse(dialog.duplicate_requested())
 
     def test_workspace_editor_waits_for_explicit_save(self) -> None:
         task_id = self.db.add_task("原事项", "第一行\n第二行", "2026-09-01", "09:00", False)
@@ -579,6 +579,8 @@ class V200Tests(unittest.TestCase):
         row.edit.setPlainText("一\n二\n三\n四\n五\n六\n七")
         self.assertEqual(row.height(), capped_height)
         row._set_editing(False)
+        QApplication.instance().processEvents()
+        self.assertGreater(row.height(), one_line_height)
         row.edit.setPlainText("只有一行")
         self.assertEqual(row.height(), one_line_height)
 
@@ -604,6 +606,16 @@ class V200Tests(unittest.TestCase):
         self.assertIn("拆成步骤", dialog.import_steps_button.text())
         self.assertEqual(dialog.import_steps_rail.height(), dialog.notes_edit.height())
 
+    def test_v458_previous_item_explains_two_distinct_continuation_actions(self) -> None:
+        task_id = self.db.add_task("旧项目", "", "2026-09-01", None, False)
+        editor = WorkspaceEditor()
+        editor.load_task(self.db.task_by_id(task_id))
+        self.assertEqual(editor.operations_label.text(), "继续处理方式")
+        self.assertEqual(editor.move_today_button.text(), "安排到今天继续处理")
+        self.assertIn("不会新建副本", editor.move_today_hint.text())
+        self.assertEqual(editor.duplicate_button.text(), "新建为后续事项")
+        self.assertIn("保留当前记录", editor.duplicate_hint.text())
+
     def test_v453_step_plus_inserts_directly_below_the_current_step(self) -> None:
         editor = TaskStepsEditor()
         editor.start_button.click()
@@ -623,7 +635,8 @@ class V200Tests(unittest.TestCase):
             {"content": "提交报告", "is_completed": False},
         ])
         self.assertEqual(preview.heading.text(), "待办步骤  1/4")
-        self.assertIn("还有 1 行", preview.rows_layout.itemAt(0).widget().text())
+        self.assertEqual(preview._summary(preview._steps[0]), "· 核价、确认折扣")
+        self.assertFalse(preview.rows_layout.itemAt(0).widget().wordWrap())
         self.assertEqual(preview.hint.text(), "↓ 点击展开全部待办步骤")
         preview._collapsed = False
         preview._update_text()
