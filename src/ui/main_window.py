@@ -31,7 +31,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.5.3"
+APP_VERSION = "4.5.4"
 
 
 def app_icon() -> QIcon:
@@ -160,19 +160,19 @@ class ExpandableStepsPreview(QWidget):
         self._collapsed = True
         self._expandable = len(self._steps) > self.MAX_VISIBLE_STEPS
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 2, 0, 0)
-        layout.setSpacing(1)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         complete = sum(1 for step in self._steps if step["is_completed"])
         self.heading = QLabel(f"待办步骤  {complete}/{len(self._steps)}")
         self.heading.setTextFormat(Qt.TextFormat.PlainText)
-        self.heading.setStyleSheet("font-size:11px; color:#8793a2; font-weight:600; padding-left:30px; margin-top:2px;")
+        self.heading.setStyleSheet("font-size:11px; color:#7d8b9d; font-weight:600; padding-left:16px;")
         self.rows_host = QWidget()
         self.rows_layout = QVBoxLayout(self.rows_host)
         self.rows_layout.setContentsMargins(0, 0, 0, 0)
         self.rows_layout.setSpacing(1)
         self.peek = FadedPreviewLine("")
         self.hint = QLabel()
-        self.hint.setStyleSheet("font-size:11px; color:#8092ae; font-weight:500; padding-left:52px;")
+        self.hint.setStyleSheet("font-size:11px; color:#8092ae; font-weight:500; padding-left:56px;")
         for widget in (self.heading, self.rows_host, self.peek, self.hint):
             widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             layout.addWidget(widget)
@@ -204,7 +204,7 @@ class ExpandableStepsPreview(QWidget):
             label.setWordWrap(True)
             label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             color = "#82906f" if step["is_completed"] else "#6f7e91"
-            label.setStyleSheet(f"font-size:11px; color:{color}; padding-left:32px;")
+            label.setStyleSheet(f"font-size:11px; color:{color}; padding-left:42px;")
             self.rows_layout.addWidget(label)
         if self._collapsed and self._expandable:
             self.peek._text = self._summary(self._steps[self.MAX_VISIBLE_STEPS])
@@ -703,7 +703,8 @@ class MainWindow(QMainWindow):
             QFrame#chromePanel { background:#f4f7fc; border:1px solid #dce6f5; border-radius:14px; }
             QFrame#previewArea { background:#e9ecef; border:1px solid #dde1e5; border-radius:13px; }
             QFrame#workspaceFloatPreview { background:#f4f7fb; border:1px solid #dbe4f0; border-radius:12px; }
-            QPushButton#workspaceScopeButton { text-align:left; min-height:30px; padding:5px 9px; color:#566476; }
+            QPushButton#workspaceScopeButton { text-align:left; min-height:26px; padding:4px 9px; color:#566476; background:transparent; border:1px solid transparent; }
+            QPushButton#workspaceScopeButton:hover { background:#f5f8fd; border-color:#d6e1f0; }
             QPushButton#workspaceScopeButton:checked { background:#eaf0ff; border:1px solid #90aaee; color:#315bb7; font-weight:600; }
             QSplitter::handle:horizontal { background:transparent; margin:2px 0; }
             QSplitter::handle:horizontal:hover { background:#c9d8fb; border-radius:5px; }
@@ -764,19 +765,17 @@ class MainWindow(QMainWindow):
         self.workspace_search.setClearButtonEnabled(True)
         self.workspace_search.textChanged.connect(self._render_workspace)
         left_layout.addWidget(self.workspace_search)
-        category_label = QLabel("事项分类")
+        category_label = QLabel("日程")
         category_label.setStyleSheet("font-size:12px; color:#718096; font-weight:600; margin-top:4px;")
         left_layout.addWidget(category_label)
         self.workspace_scope_buttons: dict[str, QPushButton] = {}
-        scope_options = (
+        schedule_scope_options = (
             ("today", "当日"),
             ("unfinished", "未完成"),
             ("all", "全部"),
-            ("fixed", "固定待办"),
-            ("important", "重要提醒"),
             ("previous", "之前未完成"),
         )
-        for key, text in scope_options:
+        for key, text in schedule_scope_options:
             button = QPushButton(text)
             button.setObjectName("workspaceScopeButton")
             button.setCheckable(True)
@@ -799,6 +798,20 @@ class MainWindow(QMainWindow):
         unfinished_filters.addWidget(self.workspace_all_unfinished)
         self.workspace_unfinished_filter_row.setVisible(False)
         left_layout.addWidget(self.workspace_unfinished_filter_row)
+        category_divider = QFrame()
+        category_divider.setFrameShape(QFrame.Shape.HLine)
+        category_divider.setStyleSheet("color:#dce5f0; margin:4px 0 2px;")
+        left_layout.addWidget(category_divider)
+        priority_label = QLabel("重点管理")
+        priority_label.setStyleSheet("font-size:12px; color:#718096; font-weight:600; margin-top:1px;")
+        left_layout.addWidget(priority_label)
+        for key, text in (("fixed", "固定待办"), ("important", "重要提醒")):
+            button = QPushButton(text)
+            button.setObjectName("workspaceScopeButton")
+            button.setCheckable(True)
+            button.clicked.connect(lambda _=False, value=key: self._set_workspace_scope(value))
+            self.workspace_scope_buttons[key] = button
+            left_layout.addWidget(button)
         left_layout.addStretch(1)
         self.workspace_float_preview = WorkspaceFloatPreview()
         left_layout.addWidget(self.workspace_float_preview)

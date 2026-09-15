@@ -1,4 +1,4 @@
-"""Focused V4.5.3 regression checks for settings, reminders, and task views."""
+"""Focused V4.5.4 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -553,7 +553,7 @@ class V200Tests(unittest.TestCase):
         self.assertEqual(self.db.task_by_id(task_id)["is_completed"], 0)
         editor = TaskStepsEditor()
         editor.set_steps(self.db.task_steps(task_id))
-        self.assertIn("如整条事项也完成", editor.guide.text())
+        self.assertIn("自行勾选整条事项", editor.guide.text())
 
     def test_v452_step_button_creates_the_first_multiline_step_immediately(self) -> None:
         editor = TaskStepsEditor()
@@ -591,9 +591,10 @@ class V200Tests(unittest.TestCase):
 
     def test_v453_import_steps_is_a_framed_explained_action(self) -> None:
         dialog = TaskDialog()
-        self.assertEqual(dialog.import_steps_area.objectName(), "importStepsArea")
-        self.assertIn("原正文会保留", dialog.import_steps_hint.text())
-        self.assertIn("新增步骤", dialog.import_steps_button.text())
+        self.assertIsNotNone(dialog.notes_section)
+        self.assertEqual(dialog.import_steps_hint.text(), "正文保留")
+        self.assertIn("原正文不会删除", dialog.import_steps_hint.toolTip())
+        self.assertIn("拆成步骤", dialog.import_steps_button.text())
 
     def test_v453_workspace_body_uses_three_stable_step_height_tiers(self) -> None:
         editor = WorkspaceEditor()

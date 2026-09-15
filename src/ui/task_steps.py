@@ -25,7 +25,11 @@ class _StepRow(QWidget):
         self.edit = QPlainTextEdit()
         self.edit.setPlainText(content)
         self.edit.setPlaceholderText("例如：核对报价、盖章确认、提交报告；可继续换行补充")
-        self.edit.setFixedHeight(58)
+        # Keep a little extra room below the native text viewport.  At 125%
+        # and 150% scaling this prevents the focused rounded border from being
+        # clipped by the row's layout geometry.
+        self.edit.setFixedHeight(62)
+        self.setMinimumHeight(62)
         self.edit.setStyleSheet("QPlainTextEdit { padding:5px 7px; }")
         self.insert = QPushButton("＋")
         self.insert.setToolTip("在这一步下方新增步骤")
@@ -79,23 +83,20 @@ class TaskStepsEditor(QWidget):
         self.panel = QWidget()
         panel_layout = QVBoxLayout(self.panel)
         panel_layout.setContentsMargins(0, 0, 0, 0)
-        panel_layout.setSpacing(5)
+        panel_layout.setSpacing(4)
         heading = QHBoxLayout()
         title = QLabel("待办步骤")
         title.setStyleSheet("font-size:13px; color:#536273; font-weight:600;")
         heading.addWidget(title)
-        heading.addStretch()
+        self.guide = QLabel("示例：核对报价、盖章确认、提交报告。勾选只记录进度。")
+        self.guide.setToolTip("每一步可写多行；全部步骤完成后，整条事项仍由你自己决定何时完成。")
+        self.guide.setStyleSheet("font-size:11px; color:#8a97a8; padding-left:8px;")
+        heading.addWidget(self.guide, 1)
         panel_layout.addLayout(heading)
-        self.guide = QLabel(
-            "例如：核对报价、盖章确认、提交报告。每一步可写多行；勾选步骤只记录进度，整条事项仍由你决定何时完成。"
-        )
-        self.guide.setWordWrap(True)
-        self.guide.setStyleSheet("font-size:11px; color:#8793a2; padding:0 2px;")
-        panel_layout.addWidget(self.guide)
         self.rows_host = QWidget()
         self.rows = QVBoxLayout(self.rows_host)
         self.rows.setContentsMargins(0, 0, 0, 0)
-        self.rows.setSpacing(6)
+        self.rows.setSpacing(5)
         panel_layout.addWidget(self.rows_host)
         outer.addWidget(self.panel)
 
@@ -189,10 +190,10 @@ class TaskStepsEditor(QWidget):
     def _refresh_guide(self) -> None:
         values = self.values()
         if values and all(step["is_completed"] for step in values):
-            self.guide.setText("所有待办步骤已完成；如整条事项也完成，请勾选事项左侧方框。")
-            self.guide.setStyleSheet("font-size:11px; color:#9a6d24; font-weight:600; padding:0 2px;")
+            self.guide.setText("步骤已全部完成；请自行勾选整条事项。")
+            self.guide.setToolTip("步骤勾选只记录进度；整条事项仍由你决定何时完成。")
+            self.guide.setStyleSheet("font-size:11px; color:#9a6d24; font-weight:600; padding-left:8px;")
         else:
-            self.guide.setText(
-                "例如：核对报价、盖章确认、提交报告。每一步可写多行；勾选步骤只记录进度，整条事项仍由你决定何时完成。"
-            )
-            self.guide.setStyleSheet("font-size:11px; color:#8793a2; padding:0 2px;")
+            self.guide.setText("示例：核对报价、盖章确认、提交报告。勾选只记录进度。")
+            self.guide.setToolTip("每一步可写多行；全部步骤完成后，整条事项仍由你自己决定何时完成。")
+            self.guide.setStyleSheet("font-size:11px; color:#8a97a8; padding-left:8px;")

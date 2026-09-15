@@ -62,28 +62,32 @@ class WorkspaceEditor(QWidget):
         # The target must exist before TitleEditor can wire Enter to it.
         self.title_edit.next_field_requested.connect(self.notes_edit.setFocus)
         self.steps_editor = TaskStepsEditor()
-        self.import_steps_area = QFrame()
-        self.import_steps_area.setObjectName("importStepsArea")
-        self.import_steps_area.setStyleSheet(
-            "QFrame#importStepsArea { background:#f7faff; border:1px solid #c8d7ef; border-radius:9px; }"
-        )
-        import_layout = QVBoxLayout(self.import_steps_area)
-        import_layout.setContentsMargins(8, 6, 8, 6)
-        import_layout.setSpacing(2)
-        self.import_steps_button = QPushButton("⇩ 按正文换行新增步骤")
+        self.notes_section = QWidget()
+        notes_layout = QVBoxLayout(self.notes_section)
+        notes_layout.setContentsMargins(0, 0, 0, 0)
+        notes_layout.setSpacing(3)
+        notes_header = QHBoxLayout()
+        notes_header.setContentsMargins(0, 0, 0, 0)
+        notes_label = QLabel("具体内容")
+        notes_label.setStyleSheet("font-size:12px; color:#718096; font-weight:600;")
+        notes_header.addWidget(notes_label)
+        notes_header.addStretch()
+        self.import_steps_hint = QLabel("正文保留")
+        self.import_steps_hint.setToolTip("把正文的每个非空行复制成一条待办步骤，原正文不会删除。")
+        self.import_steps_hint.setStyleSheet("font-size:11px; color:#8b98aa; padding-right:4px;")
+        notes_header.addWidget(self.import_steps_hint)
+        self.import_steps_button = QPushButton("⇩ 按换行拆成步骤")
         self.import_steps_button.setObjectName("importStepsButton")
         self.import_steps_button.setToolTip("把正文中每个非空行各新增为一个待办步骤；原正文不会删除。")
         self.import_steps_button.setStyleSheet(
-            "QPushButton#importStepsButton { text-align:left; color:#426ca8; background:#ffffff; border:1px solid #aebfe0; "
-            "border-radius:7px; padding:5px 8px; font-size:12px; font-weight:600; }"
+            "QPushButton#importStepsButton { color:#426ca8; background:#f7faff; border:1px solid #aebfe0; "
+            "border-radius:7px; padding:4px 8px; font-size:12px; font-weight:600; }"
             "QPushButton#importStepsButton:hover { background:#eef4ff; border-color:#7597d1; }"
             "QPushButton#importStepsButton:disabled { color:#9ca9b9; background:#f7f9fc; border-color:#dce4ef; }"
         )
-        self.import_steps_hint = QLabel("把正文的每个非空行复制成一条待办步骤，原正文会保留。")
-        self.import_steps_hint.setWordWrap(True)
-        self.import_steps_hint.setStyleSheet("font-size:11px; color:#7f8da0; padding:0 2px;")
-        import_layout.addWidget(self.import_steps_button)
-        import_layout.addWidget(self.import_steps_hint)
+        notes_header.addWidget(self.import_steps_button)
+        notes_layout.addLayout(notes_header)
+        notes_layout.addWidget(self.notes_edit)
         self.import_steps_button.clicked.connect(self._import_note_lines)
 
         self.date_edit = CompactDatePicker(QDate.currentDate())
@@ -118,8 +122,7 @@ class WorkspaceEditor(QWidget):
 
         form.addWidget(self.title_edit)
         form.addWidget(self.steps_editor)
-        form.addWidget(self.notes_edit)
-        form.addWidget(self.import_steps_area)
+        form.addWidget(self.notes_section)
         settings_label = QLabel("时间与提醒")
         settings_label.setStyleSheet("font-size:12px; color:#718096; font-weight:600; padding:14px 0 5px;")
         form.addWidget(settings_label)
@@ -252,9 +255,9 @@ class WorkspaceEditor(QWidget):
         already_imported = text == self._last_imported_note_text
         self.import_steps_button.setEnabled(has_lines and not already_imported)
         if not has_lines:
-            self.import_steps_button.setText("⇩ 按正文换行新增步骤")
+            self.import_steps_button.setText("⇩ 按换行拆成步骤")
         elif already_imported:
-            self.import_steps_button.setText("已从正文新增步骤（修改正文后可再次导入）")
+            self.import_steps_button.setText("已拆成步骤（修改正文后可再导入）")
 
     def _emit_duplicate(self) -> None:
         if self._task_id is not None and not self.is_dirty():
