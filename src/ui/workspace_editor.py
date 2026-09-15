@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -32,7 +33,6 @@ class WorkspaceEditor(QWidget):
         self._baseline: dict | None = None
         self._loading = False
         self._task_is_previous = False
-        self._last_imported_note_text: str | None = None
 
         self._outer_layout = QVBoxLayout(self)
         self._outer_layout.setContentsMargins(16, 16, 16, 16)
@@ -62,6 +62,7 @@ class WorkspaceEditor(QWidget):
         # The target must exist before TitleEditor can wire Enter to it.
         self.title_edit.next_field_requested.connect(self.notes_edit.setFocus)
         self.steps_editor = TaskStepsEditor()
+        self.steps_editor.next_field_requested.connect(self.notes_edit.setFocus)
         self.notes_section = QWidget()
         notes_layout = QVBoxLayout(self.notes_section)
         notes_layout.setContentsMargins(0, 0, 0, 0)
@@ -81,6 +82,7 @@ class WorkspaceEditor(QWidget):
         # This rail is a conversion affordance, not a second editor. Keep it
         # only as wide as its two-line action label plus a little breathing room.
         self.import_steps_rail.setFixedWidth(72)
+        self.import_steps_rail.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.import_steps_rail.setStyleSheet(
             "QFrame#importStepsRail { background:#f7faff; border:1px solid #c8d7ef; border-radius:9px; }"
         )
@@ -256,25 +258,22 @@ class WorkspaceEditor(QWidget):
         # whole for very long material instead of folding normal content away.
         content_height = self.notes_edit.document().blockCount() * 24 + 30
         self.notes_edit.setFixedHeight(max(base_height, content_height))
+        # The split tool is an extension of the body editor, so its outside
+        # frame always shares the body editor's exact height.
+        self.import_steps_rail.setFixedHeight(self.notes_edit.height())
 
     def _import_note_lines(self) -> None:
         text = self.notes_edit.toPlainText()
         imported = self.steps_editor.import_note_lines(text)
         if imported:
-            self._last_imported_note_text = text
-            self.import_steps_button.setText(f"已从正文新增 {imported} 个步骤")
             self._refresh_status()
             self._refresh_import_button()
 
     def _refresh_import_button(self) -> None:
         text = self.notes_edit.toPlainText()
         has_lines = bool([line for line in text.splitlines() if line.strip()])
-        already_imported = text == self._last_imported_note_text
-        self.import_steps_button.setEnabled(has_lines and not already_imported)
-        if not has_lines:
-            self.import_steps_button.setText("⇩\n拆成步骤")
-        elif already_imported:
-            self.import_steps_button.setText("已拆成\n步骤")
+        self.import_steps_button.setEnabled(has_lines)
+        self.import_steps_button.setText("⇩\n拆成步骤")
 
     def _emit_duplicate(self) -> None:
         if self._task_id is not None and not self.is_dirty():
@@ -289,7 +288,6 @@ class WorkspaceEditor(QWidget):
         self._task_id = None
         self._baseline = None
         self._task_is_previous = False
-        self._last_imported_note_text = None
         self.heading.setText("选择一条事项")
         self.hint.setText("从中间列表选择后可直接修改；只有点击保存才会生效。")
         self.title_edit.clear()
@@ -317,7 +315,6 @@ class WorkspaceEditor(QWidget):
         self._loading = True
         self._task_id = int(task["id"])
         self._task_is_previous = not bool(task["is_completed"]) and task["task_date"] < QDate.currentDate().toString("yyyy-MM-dd")
-        self._last_imported_note_text = None
         self.heading.setText("编辑事项")
         self.hint.setText("可以安心复制或调整内容；点击保存后才会写入这条事项。")
         self.title_edit.setPlainText(task["title"])
@@ -372,7 +369,6 @@ class WorkspaceEditor(QWidget):
             return
         values = self._baseline
         self._loading = True
-        self._last_imported_note_text = None
         self.title_edit.setPlainText(values["title"])
         self.notes_edit.setPlainText(values["notes"])
         self.date_edit.setDate(QDate.fromString(values["task_date"], "yyyy-MM-dd"))

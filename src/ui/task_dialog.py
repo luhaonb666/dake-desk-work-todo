@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QDate, QTime, QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import QDate, QTime, Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -79,7 +79,6 @@ class TaskDialog(QDialog):
     def __init__(self, task=None, parent=None, *, task_steps=None) -> None:
         super().__init__(parent)
         self.task = task
-        self._last_imported_note_text: str | None = None
         self.setObjectName("taskDialog")
         self.setWindowTitle("编辑事项" if task else "添加事项")
         self.setMinimumWidth(470)
@@ -108,6 +107,7 @@ class TaskDialog(QDialog):
         self.title_edit.next_field_requested.connect(self.notes_edit.setFocus)
         self.steps_editor = TaskStepsEditor()
         self.steps_editor.set_steps(task_steps)
+        self.steps_editor.next_field_requested.connect(self.notes_edit.setFocus)
         self.notes_section = QFrame()
         notes_layout = QVBoxLayout(self.notes_section)
         notes_layout.setContentsMargins(0, 0, 0, 0)
@@ -121,6 +121,8 @@ class TaskDialog(QDialog):
         # This rail is a conversion affordance, not a second editor. Keep it
         # only as wide as its two-line action label plus a little breathing room.
         self.import_steps_rail.setFixedWidth(72)
+        self.import_steps_rail.setFixedHeight(self.notes_edit.height())
+        self.import_steps_rail.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.import_steps_rail.setStyleSheet(
             "QFrame#importStepsRail { background:#f7faff; border:1px solid #c8d7ef; border-radius:9px; }"
         )
@@ -147,7 +149,7 @@ class TaskDialog(QDialog):
         notes_layout.addLayout(notes_content)
         self.import_steps_button.clicked.connect(self._import_note_lines)
         self.notes_edit.textChanged.connect(self._refresh_import_button)
-        self.steps_editor.structure_changed.connect(self._reflow_after_step_structure_change)
+        self.steps_editor.structure_changed.connect(self._refresh_step_layout)
 
         self.date_edit = CompactDatePicker()
         selected = QDate.fromString(task["task_date"], "yyyy-MM-dd") if task else QDate.currentDate()
@@ -257,23 +259,21 @@ class TaskDialog(QDialog):
         text = self.notes_edit.toPlainText()
         imported = self.steps_editor.import_note_lines(text)
         if imported:
-            self._last_imported_note_text = text
-            self.import_steps_button.setText(f"已从正文新增 {imported} 个步骤")
             self._refresh_import_button()
 
     def _refresh_import_button(self) -> None:
         text = self.notes_edit.toPlainText()
         has_lines = bool([line for line in text.splitlines() if line.strip()])
-        already_imported = text == self._last_imported_note_text
-        self.import_steps_button.setEnabled(has_lines and not already_imported)
-        if not has_lines:
-            self.import_steps_button.setText("⇩\n拆成步骤")
-        elif already_imported:
-            self.import_steps_button.setText("已拆成\n步骤")
+        self.import_steps_button.setEnabled(has_lines)
+        # Conversion stays available after every use: users often continue
+        # editing the body and need to split its current lines again.
+        self.import_steps_button.setText("⇩\n拆成步骤")
 
-    def _reflow_after_step_structure_change(self) -> None:
-        """Remove stale blank space after rows are added or the last one is deleted."""
-        QTimer.singleShot(0, self.adjustSize)
+    def _refresh_step_layout(self) -> None:
+        """Let the form reclaim removed-row space without resizing the dialog."""
+        self.steps_editor.updateGeometry()
+        self.notes_section.updateGeometry()
+        self.layout().activate()
 
     def values(self) -> dict:
         due_time = None

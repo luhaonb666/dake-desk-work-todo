@@ -14,6 +14,7 @@ class _StepTextEdit(QPlainTextEdit):
     """Expose focus changes so the row shell owns the complete focus border."""
 
     focus_changed = pyqtSignal(bool)
+    confirm_requested = pyqtSignal()
 
     def focusInEvent(self, event):  # noqa: N802
         super().focusInEvent(event)
@@ -23,6 +24,17 @@ class _StepTextEdit(QPlainTextEdit):
         super().focusOutEvent(event)
         self.focus_changed.emit(False)
 
+    def keyPressEvent(self, event):  # noqa: N802
+        """Make Enter advance through the form; explicit modified Enter wraps."""
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if event.modifiers() & (Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.AltModifier):
+                super().keyPressEvent(event)
+            else:
+                self.confirm_requested.emit()
+                event.accept()
+            return
+        super().keyPressEvent(event)
+
 
 class _StepRow(QWidget):
     """One executable step; its detail is intentionally allowed to span lines."""
@@ -30,11 +42,15 @@ class _StepRow(QWidget):
     changed = pyqtSignal()
     remove_requested = pyqtSignal(object)
     insert_requested = pyqtSignal(object)
+    confirm_requested = pyqtSignal(object)
 
     def __init__(self, content: str = "", completed: bool = False, parent=None) -> None:
         super().__init__(parent)
         row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
+        # Keep a dedicated bottom safety gap.  At macOS display scaling the
+        # native focus stroke can otherwise be painted one pixel outside an
+        # exactly fitted row and look as if its lower edge were cut away.
+        row.setContentsMargins(0, 0, 0, 4)
         row.setSpacing(6)
         self.check = QCheckBox()
         self.check.setChecked(completed)
@@ -44,6 +60,7 @@ class _StepRow(QWidget):
         shell_layout.setContentsMargins(2, 2, 2, 2)
         shell_layout.setSpacing(0)
         self.edit = _StepTextEdit()
+        self._editing = False
         self.edit.setPlainText(content)
         self.edit.setPlaceholderText("例如：核对报价、盖章确认、提交报告；可继续换行补充")
         self.edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -70,13 +87,19 @@ class _StepRow(QWidget):
         row.addWidget(self.insert, 0)
         row.addWidget(self.remove, 0)
         self.check.toggled.connect(self.changed)
-        self.edit.textChanged.connect(self._resize_to_content)
+        self.edit.textChanged.connect(self._refresh_height)
         self.edit.textChanged.connect(self.changed)
-        self.edit.focus_changed.connect(self._refresh_focus_border)
+        self.edit.focus_changed.connect(self._set_editing)
+        self.edit.confirm_requested.connect(lambda: self.confirm_requested.emit(self))
         self.remove.clicked.connect(lambda: self.remove_requested.emit(self))
         self.insert.clicked.connect(lambda: self.insert_requested.emit(self))
-        self._resize_to_content()
+        self._refresh_height()
         self._refresh_focus_border(False)
+
+    def _set_editing(self, focused: bool) -> None:
+        self._editing = focused
+        self._refresh_focus_border(focused)
+        self._refresh_height()
 
     def _refresh_focus_border(self, focused: bool) -> None:
         color = "#7f9cf1" if focused else "#d8e1ee"
@@ -87,16 +110,25 @@ class _StepRow(QWidget):
             "}"
         )
 
-    def _resize_to_content(self) -> None:
-        """Show two lines by default, then grow only to a calm four-and-a-half lines."""
+    def _refresh_height(self) -> None:
+        """Use calm browse/edit states instead of resizing on every typed line.
+
+        Saved steps browse at their real number of lines.  Focusing any step,
+        even an old one-line step, reserves a stable three-line writing area.
+        Only explicit Shift/Alt+Enter line breaks beyond that grow the editor,
+        capped at four-and-a-half lines with an internal scrollbar.
+        """
         line_height = max(1, self.edit.fontMetrics().lineSpacing())
-        line_count = max(2, self.edit.document().blockCount())
-        visible_lines = min(4.5, float(line_count))
-        # Padding plus a small bottom allowance keeps the native rounded focus
-        # border fully inside the row at 125% and 150% display scaling.
+        stored_lines = max(1, self.edit.document().blockCount())
+        visible_lines = float(stored_lines)
+        if self._editing:
+            visible_lines = max(3.0, visible_lines)
+        visible_lines = min(4.5, visible_lines)
         height = math.ceil(visible_lines * line_height) + 18
         self.edit_shell.setFixedHeight(height)
-        self.setFixedHeight(height)
+        # The shell fits above the layout's dedicated bottom margin, so the
+        # complete rounded selection border remains visible on every row.
+        self.setFixedHeight(height + 4)
 
     def value(self) -> dict:
         return {"content": self.edit.toPlainText().strip(), "is_completed": self.check.isChecked()}
@@ -107,6 +139,7 @@ class TaskStepsEditor(QWidget):
 
     changed = pyqtSignal()
     structure_changed = pyqtSignal()
+    next_field_requested = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -167,6 +200,7 @@ class TaskStepsEditor(QWidget):
         row.changed.connect(self._on_changed)
         row.remove_requested.connect(self.remove_row)
         row.insert_requested.connect(self.insert_after)
+        row.confirm_requested.connect(self.confirm_row)
         return row
 
     def add_row(self, content: str = "", completed: bool = False, *, focus: bool = True) -> None:
@@ -193,6 +227,20 @@ class TaskStepsEditor(QWidget):
         self._on_changed()
         if not self._loading:
             self.structure_changed.emit()
+
+    def confirm_row(self, existing: _StepRow) -> None:
+        """Enter advances to the next step, then to the body after the last."""
+        rows = self._rows()
+        try:
+            next_row = rows[rows.index(existing) + 1]
+        except (ValueError, IndexError):
+            self.next_field_requested.emit()
+            return
+        # Also update the deterministic visual state before Qt delivers the
+        # focus event.  This keeps keyboard navigation stable in both a shown
+        # window and the editor's off-screen construction path.
+        next_row._set_editing(True)
+        next_row.edit.setFocus()
 
     def import_note_lines(self, text: str) -> int:
         """Append one new step for each non-empty note line, never deleting notes."""

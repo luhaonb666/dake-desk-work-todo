@@ -1,4 +1,4 @@
-"""Focused V4.5.6 regression checks for settings, reminders, and task views."""
+"""Focused V4.5.7 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
-from PyQt6.QtCore import QDate, QMimeData, Qt
+from PyQt6.QtCore import QDate, QEvent, QMimeData, Qt
+from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import QApplication, QCheckBox, QLabel, QMessageBox
 
 from storage.database import Database
@@ -563,17 +564,45 @@ class V200Tests(unittest.TestCase):
         editor._rows()[0].edit.setPlainText("核价\n确认折扣")
         self.assertEqual(editor.values()[0]["content"], "核价\n确认折扣")
 
-    def test_v455_step_editor_starts_at_two_lines_and_caps_at_four_and_a_half(self) -> None:
+    def test_v457_step_editor_browses_at_real_height_then_uses_stable_edit_height(self) -> None:
         editor = TaskStepsEditor()
         editor.start()
         row = editor._rows()[0]
-        two_line_height = row.height()
-        row.edit.setPlainText("第一行\n第二行\n第三行")
-        self.assertGreater(row.height(), two_line_height)
+        one_line_height = row.height()
+        row._set_editing(True)
+        editing_height = row.height()
+        self.assertGreater(editing_height, one_line_height)
+        row.edit.setPlainText("一\n二\n三")
+        self.assertEqual(row.height(), editing_height)
         row.edit.setPlainText("一\n二\n三\n四\n五")
         capped_height = row.height()
         row.edit.setPlainText("一\n二\n三\n四\n五\n六\n七")
         self.assertEqual(row.height(), capped_height)
+        row._set_editing(False)
+        row.edit.setPlainText("只有一行")
+        self.assertEqual(row.height(), one_line_height)
+
+    def test_v457_step_enter_advances_and_split_remains_available(self) -> None:
+        editor = TaskStepsEditor()
+        editor.add_row("核价", focus=False)
+        editor.add_row("盖章", focus=False)
+        advanced = []
+        editor.next_field_requested.connect(lambda: advanced.append(True))
+        first = editor._rows()[0]
+        first.edit.keyPressEvent(QKeyEvent(
+            QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier
+        ))
+        self.assertTrue(editor._rows()[1]._editing)
+        self.assertNotIn("\n", first.edit.toPlainText())
+        editor.confirm_row(editor._rows()[1])
+        self.assertEqual(advanced, [True])
+
+        dialog = TaskDialog()
+        dialog.notes_edit.setPlainText("核价\n盖章")
+        dialog.import_steps_button.click()
+        self.assertTrue(dialog.import_steps_button.isEnabled())
+        self.assertIn("拆成步骤", dialog.import_steps_button.text())
+        self.assertEqual(dialog.import_steps_rail.height(), dialog.notes_edit.height())
 
     def test_v453_step_plus_inserts_directly_below_the_current_step(self) -> None:
         editor = TaskStepsEditor()
