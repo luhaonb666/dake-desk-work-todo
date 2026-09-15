@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import pyqtSignal
+import math
+
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget,
 )
@@ -25,11 +27,7 @@ class _StepRow(QWidget):
         self.edit = QPlainTextEdit()
         self.edit.setPlainText(content)
         self.edit.setPlaceholderText("例如：核对报价、盖章确认、提交报告；可继续换行补充")
-        # Keep a little extra room below the native text viewport.  At 125%
-        # and 150% scaling this prevents the focused rounded border from being
-        # clipped by the row's layout geometry.
-        self.edit.setFixedHeight(62)
-        self.setMinimumHeight(62)
+        self.edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.edit.setStyleSheet("QPlainTextEdit { padding:5px 7px; }")
         self.insert = QPushButton("＋")
         self.insert.setToolTip("在这一步下方新增步骤")
@@ -51,9 +49,22 @@ class _StepRow(QWidget):
         row.addWidget(self.insert, 0)
         row.addWidget(self.remove, 0)
         self.check.toggled.connect(self.changed)
+        self.edit.textChanged.connect(self._resize_to_content)
         self.edit.textChanged.connect(self.changed)
         self.remove.clicked.connect(lambda: self.remove_requested.emit(self))
         self.insert.clicked.connect(lambda: self.insert_requested.emit(self))
+        self._resize_to_content()
+
+    def _resize_to_content(self) -> None:
+        """Show two lines by default, then grow only to a calm four-and-a-half lines."""
+        line_height = max(1, self.edit.fontMetrics().lineSpacing())
+        line_count = max(2, self.edit.document().blockCount())
+        visible_lines = min(4.5, float(line_count))
+        # Padding plus a small bottom allowance keeps the native rounded focus
+        # border fully inside the row at 125% and 150% display scaling.
+        height = math.ceil(visible_lines * line_height) + 18
+        self.edit.setFixedHeight(height)
+        self.setFixedHeight(height)
 
     def value(self) -> dict:
         return {"content": self.edit.toPlainText().strip(), "is_completed": self.check.isChecked()}
@@ -63,6 +74,7 @@ class TaskStepsEditor(QWidget):
     """An opt-in step area that starts small and expands on the first click."""
 
     changed = pyqtSignal()
+    structure_changed = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -131,6 +143,8 @@ class TaskStepsEditor(QWidget):
         if focus:
             row.edit.setFocus()
         self._on_changed()
+        if not self._loading:
+            self.structure_changed.emit()
 
     def insert_after(self, existing: _StepRow) -> None:
         """Create the next step beside the row the user is currently writing."""
@@ -144,6 +158,8 @@ class TaskStepsEditor(QWidget):
         self._refresh_panel()
         row.edit.setFocus()
         self._on_changed()
+        if not self._loading:
+            self.structure_changed.emit()
 
     def import_note_lines(self, text: str) -> int:
         """Append one new step for each non-empty note line, never deleting notes."""
@@ -157,6 +173,8 @@ class TaskStepsEditor(QWidget):
         row.deleteLater()
         self._refresh_panel()
         self._on_changed()
+        if not self._loading:
+            self.structure_changed.emit()
 
     def set_steps(self, steps) -> None:
         self._loading = True
@@ -169,6 +187,7 @@ class TaskStepsEditor(QWidget):
         self._loading = False
         self._refresh_panel()
         self._refresh_guide()
+        self.structure_changed.emit()
 
     def values(self) -> list[dict]:
         return [row.value() for row in self._rows() if row.value()["content"]]

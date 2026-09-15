@@ -1,4 +1,4 @@
-"""Focused V4.5.4 regression checks for settings, reminders, and task views."""
+"""Focused V4.5.5 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -563,6 +563,18 @@ class V200Tests(unittest.TestCase):
         editor._rows()[0].edit.setPlainText("核价\n确认折扣")
         self.assertEqual(editor.values()[0]["content"], "核价\n确认折扣")
 
+    def test_v455_step_editor_starts_at_two_lines_and_caps_at_four_and_a_half(self) -> None:
+        editor = TaskStepsEditor()
+        editor.start()
+        row = editor._rows()[0]
+        two_line_height = row.height()
+        row.edit.setPlainText("第一行\n第二行\n第三行")
+        self.assertGreater(row.height(), two_line_height)
+        row.edit.setPlainText("一\n二\n三\n四\n五")
+        capped_height = row.height()
+        row.edit.setPlainText("一\n二\n三\n四\n五\n六\n七")
+        self.assertEqual(row.height(), capped_height)
+
     def test_v453_step_plus_inserts_directly_below_the_current_step(self) -> None:
         editor = TaskStepsEditor()
         editor.start_button.click()
@@ -592,9 +604,10 @@ class V200Tests(unittest.TestCase):
     def test_v453_import_steps_is_a_framed_explained_action(self) -> None:
         dialog = TaskDialog()
         self.assertIsNotNone(dialog.notes_section)
-        self.assertEqual(dialog.import_steps_hint.text(), "正文保留")
+        self.assertEqual(dialog.import_steps_hint.text(), "按每行\n新增一步\n正文保留")
         self.assertIn("原正文不会删除", dialog.import_steps_hint.toolTip())
         self.assertIn("拆成步骤", dialog.import_steps_button.text())
+        self.assertEqual(dialog.import_steps_rail.width(), 94)
 
     def test_v453_workspace_body_uses_three_stable_step_height_tiers(self) -> None:
         editor = WorkspaceEditor()

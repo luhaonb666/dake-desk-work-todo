@@ -31,7 +31,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.5.4"
+APP_VERSION = "4.5.5"
 
 
 def app_icon() -> QIcon:
@@ -658,9 +658,9 @@ class MainWindow(QMainWindow):
         toolbar = QHBoxLayout()
         toolbar.setContentsMargins(0, 0, 0, 0)
         self.tabs = QTabBar()
-        self.tabs.addTab("当日")
-        self.tabs.addTab("未完成")
-        self.tabs.addTab("全部")
+        self.tabs.addTab("今天事项")
+        self.tabs.addTab("当日未完成")
+        self.tabs.addTab("全部记录")
         self.tabs.setStyleSheet("QTabBar::tab:last { margin-left:18px; }")
         self.tabs.currentChanged.connect(self.on_tab_changed)
         toolbar.addWidget(self.tabs)
@@ -770,9 +770,9 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(category_label)
         self.workspace_scope_buttons: dict[str, QPushButton] = {}
         schedule_scope_options = (
-            ("today", "当日"),
-            ("unfinished", "未完成"),
-            ("all", "全部"),
+            ("today", "今天事项"),
+            ("unfinished", "当日未完成"),
+            ("all", "全部记录"),
             ("previous", "之前未完成"),
         )
         for key, text in schedule_scope_options:
@@ -821,7 +821,7 @@ class MainWindow(QMainWindow):
         center_layout = QVBoxLayout(center)
         center_layout.setContentsMargins(12, 12, 12, 12)
         center_layout.setSpacing(7)
-        self.workspace_list_title = QLabel("当日事项")
+        self.workspace_list_title = QLabel("今天事项")
         self.workspace_list_title.setStyleSheet("font-size:15px; color:#3c4b5e; font-weight:600;")
         center_layout.addWidget(self.workspace_list_title)
         self.workspace_scroll = QScrollArea()
@@ -997,7 +997,7 @@ class MainWindow(QMainWindow):
             label = f"之前未完成（{len(tasks)}）"
         elif self._workspace_scope == "all":
             tasks = self.db.all_tasks()
-            label = "全部事项"
+            label = "全部记录"
         elif self._workspace_scope == "fixed":
             tasks = self.db.fixed_tasks()
             label = f"固定待办（{len(tasks)}）"
@@ -1014,7 +1014,7 @@ class MainWindow(QMainWindow):
                 label = f"{selected_day} · 未完成"
         else:
             tasks = self.db.tasks_for(today)
-            label = "当日事项"
+            label = "今天事项"
         return tasks, label
 
     @staticmethod
@@ -1290,7 +1290,7 @@ class MainWindow(QMainWindow):
         normal.sort(key=lambda task: (task["due_time"] is None, task["due_time"] or "", task["created_at"]))
         fixed = [task for task in tasks if task["is_fixed"]]
         if normal:
-            section_title = "今日事项" if active_tab == 0 else f"{selected_day} · 未完成"
+            section_title = "今天事项" if active_tab == 0 else f"{selected_day} · 未完成"
             self.list_layout.addWidget(self.section_label(section_title))
             for task in normal:
                 self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task), task_steps=self._steps_for(task)))

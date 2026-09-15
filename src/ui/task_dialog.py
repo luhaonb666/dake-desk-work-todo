@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QDate, QTime, Qt, pyqtSignal
+from PyQt6.QtCore import QDate, QTime, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -111,28 +111,41 @@ class TaskDialog(QDialog):
         self.notes_section = QFrame()
         notes_layout = QVBoxLayout(self.notes_section)
         notes_layout.setContentsMargins(0, 0, 0, 0)
-        notes_layout.setSpacing(3)
-        notes_header = QHBoxLayout()
-        notes_header.setContentsMargins(0, 0, 0, 0)
-        notes_header.addStretch()
-        self.import_steps_hint = QLabel("正文保留")
-        self.import_steps_hint.setToolTip("把正文的每个非空行复制成一条待办步骤，原正文不会删除。")
-        self.import_steps_hint.setStyleSheet("font-size:11px; color:#8b98aa; padding-right:4px;")
-        notes_header.addWidget(self.import_steps_hint)
-        self.import_steps_button = QPushButton("⇩ 按换行拆成步骤")
+        notes_layout.setSpacing(0)
+        notes_content = QHBoxLayout()
+        notes_content.setContentsMargins(0, 0, 0, 0)
+        notes_content.setSpacing(7)
+        notes_content.addWidget(self.notes_edit, 1)
+        self.import_steps_rail = QFrame()
+        self.import_steps_rail.setObjectName("importStepsRail")
+        self.import_steps_rail.setFixedWidth(94)
+        self.import_steps_rail.setStyleSheet(
+            "QFrame#importStepsRail { background:#f7faff; border:1px solid #c8d7ef; border-radius:9px; }"
+        )
+        rail_layout = QVBoxLayout(self.import_steps_rail)
+        rail_layout.setContentsMargins(5, 6, 5, 6)
+        rail_layout.setSpacing(4)
+        self.import_steps_button = QPushButton("⇩\n拆成步骤")
         self.import_steps_button.setObjectName("importStepsButton")
         self.import_steps_button.setToolTip("把正文中每个非空行各新增为一个待办步骤；原正文不会删除。")
         self.import_steps_button.setStyleSheet(
-            "QPushButton#importStepsButton { color:#426ca8; background:#f7faff; border:1px solid #aebfe0; "
-            "border-radius:7px; padding:4px 8px; font-size:12px; font-weight:600; }"
+            "QPushButton#importStepsButton { color:#426ca8; background:#ffffff; border:1px solid #aebfe0; "
+            "border-radius:7px; padding:5px 2px; font-size:12px; font-weight:600; }"
             "QPushButton#importStepsButton:hover { background:#eef4ff; border-color:#7597d1; }"
             "QPushButton#importStepsButton:disabled { color:#9ca9b9; background:#f7f9fc; border-color:#dce4ef; }"
         )
-        notes_header.addWidget(self.import_steps_button)
-        notes_layout.addLayout(notes_header)
-        notes_layout.addWidget(self.notes_edit)
+        self.import_steps_hint = QLabel("按每行\n新增一步\n正文保留")
+        self.import_steps_hint.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        self.import_steps_hint.setToolTip("把正文的每个非空行复制成一条待办步骤，原正文不会删除。")
+        self.import_steps_hint.setStyleSheet("font-size:10px; color:#7f8da0; line-height:1.35;")
+        rail_layout.addWidget(self.import_steps_button)
+        rail_layout.addWidget(self.import_steps_hint)
+        rail_layout.addStretch(1)
+        notes_content.addWidget(self.import_steps_rail, 0)
+        notes_layout.addLayout(notes_content)
         self.import_steps_button.clicked.connect(self._import_note_lines)
         self.notes_edit.textChanged.connect(self._refresh_import_button)
+        self.steps_editor.structure_changed.connect(self._reflow_after_step_structure_change)
 
         self.date_edit = CompactDatePicker()
         selected = QDate.fromString(task["task_date"], "yyyy-MM-dd") if task else QDate.currentDate()
@@ -252,9 +265,13 @@ class TaskDialog(QDialog):
         already_imported = text == self._last_imported_note_text
         self.import_steps_button.setEnabled(has_lines and not already_imported)
         if not has_lines:
-            self.import_steps_button.setText("⇩ 按换行拆成步骤")
+            self.import_steps_button.setText("⇩\n拆成步骤")
         elif already_imported:
-            self.import_steps_button.setText("已拆成步骤（修改正文后可再导入）")
+            self.import_steps_button.setText("已拆成\n步骤")
+
+    def _reflow_after_step_structure_change(self) -> None:
+        """Remove stale blank space after rows are added or the last one is deleted."""
+        QTimer.singleShot(0, self.adjustSize)
 
     def values(self) -> dict:
         due_time = None
