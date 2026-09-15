@@ -32,7 +32,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.6"
+APP_VERSION = "4.6.1"
 
 
 def app_icon() -> QIcon:
@@ -1158,6 +1158,14 @@ class MainWindow(QMainWindow):
                 int(task["important_reminder_offset_minutes"])
                 if "important_reminder_offset_minutes" in task.keys() else 0
             ),
+            important_repeat_minutes=(
+                int(task["important_repeat_minutes"])
+                if "important_repeat_minutes" in task.keys() else 0
+            ),
+            important_repeat_limit=(
+                int(task["important_repeat_limit"])
+                if "important_repeat_limit" in task.keys() else 0
+            ),
             content_mode=task["content_mode"] if "content_mode" in task.keys() else "notes",
         )
         self.db.replace_task_steps(copied_id, [
@@ -1478,7 +1486,7 @@ class MainWindow(QMainWindow):
 
     def dismiss_important_reminder(self, task_id: int) -> None:
         """Dismiss the reminder only; the underlying task remains unfinished."""
-        self.db.acknowledge_important_reminder(task_id)
+        self.db.dismiss_or_repeat_important_reminder(task_id)
         self._refresh_important_reminders()
 
     def snooze_important_reminder(self, task_id: int, minutes: int) -> None:

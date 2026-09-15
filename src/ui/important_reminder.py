@@ -26,7 +26,7 @@ class ImportantReminderWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.setFixedWidth(332)
         self.setStyleSheet(
-            "QWidget#importantReminderWindow { background:#fffaf0; border:2px solid #d59116; border-radius:16px; }"
+            "QWidget#importantReminderWindow { background:#fffdf9; border:2px solid #d9d1c6; border-radius:16px; }"
         )
 
         layout = QVBoxLayout(self)
@@ -34,26 +34,26 @@ class ImportantReminderWindow(QWidget):
         layout.setSpacing(8)
         heading = QHBoxLayout()
         title = QLabel("重要事项提醒")
-        title.setStyleSheet("font-size:16px; font-weight:600; color:#8a5600; background:transparent; border:none;")
+        title.setStyleSheet("font-size:16px; font-weight:600; color:#3d4d61; background:transparent; border:none;")
         heading.addWidget(title)
         heading.addStretch()
         self.queue_label = QLabel()
-        self.queue_label.setStyleSheet("font-size:11px; color:#9a6d24; background:transparent; border:none;")
+        self.queue_label.setStyleSheet("font-size:11px; color:#7b8795; background:transparent; border:none;")
         heading.addWidget(self.queue_label)
         self.close_button = QPushButton("×")
         self.close_button.setAccessibleName("关闭提醒")
         self.close_button.setToolTip("关闭提醒，不会完成待办")
         self.close_button.setFixedSize(24, 24)
         self.close_button.setStyleSheet(
-            "QPushButton { color:#8a5600; background:transparent; border:none; font-size:22px; padding:0; }"
-            "QPushButton:hover { color:#5d3a00; background:#f7e4bd; border-radius:12px; }"
+            "QPushButton { color:#667085; background:transparent; border:none; font-size:22px; padding:0; }"
+            "QPushButton:hover { color:#3d4d61; background:#f1ece5; border-radius:12px; }"
         )
         self.close_button.clicked.connect(self._dismiss_current)
         heading.addWidget(self.close_button)
         layout.addLayout(heading)
 
         self.time_label = QLabel()
-        self.time_label.setStyleSheet("font-size:12px; color:#a16b14; background:transparent; border:none;")
+        self.time_label.setStyleSheet("font-size:12px; color:#7a6b5b; background:transparent; border:none;")
         layout.addWidget(self.time_label)
         self.task_title = QLabel()
         self.task_title.setWordWrap(True)
@@ -67,10 +67,10 @@ class ImportantReminderWindow(QWidget):
 
         divider = QFrame()
         divider.setFrameShape(QFrame.Shape.HLine)
-        divider.setStyleSheet("color:#efd9ad; border:none; background:#efd9ad; max-height:1px;")
+        divider.setStyleSheet("color:#e7e0d7; border:none; background:#e7e0d7; max-height:1px;")
         layout.addWidget(divider)
         hint = QLabel("暂时没空可稍后提醒；关闭提醒不会完成待办。")
-        hint.setStyleSheet("font-size:11px; color:#9b7a42; background:transparent; border:none;")
+        hint.setStyleSheet("font-size:11px; color:#7b746d; background:transparent; border:none;")
         layout.addWidget(hint)
         snooze_row = QHBoxLayout()
         snooze_row.setContentsMargins(0, 0, 0, 0)
@@ -79,8 +79,8 @@ class ImportantReminderWindow(QWidget):
             button = QPushButton(f"从现在起 {minutes} 分钟后")
             button.setToolTip("从点击这一刻开始计算，届时会再次显示这条软件内置顶提醒。")
             button.setStyleSheet(
-                "QPushButton { background:#fffdf8; border:1px solid #d9b979; border-radius:9px; color:#8a5600; padding:7px 9px; }"
-                "QPushButton:hover { background:#fff0cd; }"
+                "QPushButton { background:#ffffff; border:1px solid #d8d0c7; border-radius:9px; color:#566f91; padding:7px 9px; }"
+                "QPushButton:hover { background:#f7f2eb; border-color:#bcb1a5; }"
             )
             button.clicked.connect(lambda _=False, value=minutes: self._snooze_current(value))
             snooze_row.addWidget(button)
@@ -88,8 +88,8 @@ class ImportantReminderWindow(QWidget):
         layout.addLayout(snooze_row)
         self.dismiss_button = QPushButton("关闭提醒")
         self.dismiss_button.setStyleSheet(
-            "QPushButton { background:#d48a0b; border:none; border-radius:9px; color:white; font-weight:600; padding:8px 14px; }"
-            "QPushButton:hover { background:#b87608; }"
+            "QPushButton { background:#5877a2; border:none; border-radius:9px; color:white; font-weight:600; padding:8px 14px; }"
+            "QPushButton:hover { background:#466488; }"
         )
         self.dismiss_button.clicked.connect(self._dismiss_current)
         layout.addWidget(self.dismiss_button, 0, Qt.AlignmentFlag.AlignRight)

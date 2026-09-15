@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QTextEdit,
     QVBoxLayout,
+    QWidget,
 )
 
 from ui.controls import CompactDatePicker, NoWheelComboBox, TIME_HOURS, TIME_MINUTES, normalize_note_text
@@ -161,17 +162,19 @@ class TaskDialog(QDialog):
         task_supports_system_reminder = bool(task and "windows_reminder_enabled" in task.keys())
         reminder_enabled = bool(task and task_supports_system_reminder and task["windows_reminder_enabled"])
         reminder_offset = int(task["important_reminder_offset_minutes"]) if task and "important_reminder_offset_minutes" in task.keys() else 0
-        self.reminder_mode_combo = NoWheelComboBox()
-        self.reminder_mode_combo.addItem("不设置重要提醒", False)
-        self.reminder_mode_combo.addItem("软件置顶强提醒", True)
-        self.reminder_mode_combo.setCurrentIndex(1 if reminder_enabled else 0)
-        self.reminder_mode_combo.setToolTip("强提醒会显示在右下角，可关闭或选择稍后提醒。")
+        reminder_repeat_minutes = int(task["important_repeat_minutes"]) if task and "important_repeat_minutes" in task.keys() else 0
+        reminder_repeat_limit = int(task["important_repeat_limit"]) if task and "important_repeat_limit" in task.keys() else 0
+        self.important_reminder_check = QCheckBox("启用重要提醒")
+        self.important_reminder_check.setChecked(reminder_enabled)
+        self.important_reminder_check.setToolTip("勾选后，软件会在右下角显示置顶提醒；提醒可关闭或稍后提醒。")
         self.reminder_timing_combo = NoWheelComboBox()
         for label, minutes in (
             ("事项时间：准点提醒", 0),
             ("事项时间前 10 分钟", 10),
             ("事项时间前 30 分钟", 30),
             ("事项时间前 1 小时", 60),
+            ("事项时间前 1 天", 24 * 60),
+            ("事项时间前 3 天", 3 * 24 * 60),
         ):
             self.reminder_timing_combo.addItem(label, minutes)
         self.reminder_timing_combo.setCurrentIndex(max(0, self.reminder_timing_combo.findData(reminder_offset)))
@@ -184,19 +187,59 @@ class TaskDialog(QDialog):
         reminder_layout = QVBoxLayout(self.windows_reminder_box)
         reminder_layout.setContentsMargins(10, 7, 10, 7)
         reminder_layout.setSpacing(5)
-        reminder_title = QLabel("重要提醒")
-        reminder_title.setStyleSheet("color:#46627f; font-weight:600; background:transparent;")
-        reminder_layout.addWidget(reminder_title)
-        reminder_mode_row = QHBoxLayout()
-        reminder_mode_row.setContentsMargins(0, 0, 0, 0)
-        reminder_mode_row.addWidget(QLabel("提醒方式"))
-        reminder_mode_row.addWidget(self.reminder_mode_combo, 1)
-        reminder_layout.addLayout(reminder_mode_row)
+        reminder_layout.addWidget(self.important_reminder_check)
+        self.reminder_summary = QLabel("软件会在右下角置顶提醒；关闭提醒不会完成事项。")
+        self.reminder_summary.setWordWrap(True)
+        self.reminder_summary.setStyleSheet("font-size:11px; color:#718096; background:transparent; padding-left:23px;")
+        reminder_layout.addWidget(self.reminder_summary)
+        self.reminder_expand_button = QPushButton("展开提醒设置")
+        self.reminder_expand_button.setCheckable(True)
+        self.reminder_expand_button.setChecked(reminder_enabled)
+        self.reminder_expand_button.setStyleSheet(
+            "QPushButton { text-align:left; color:#466fa5; background:transparent; border:none; padding:2px 0 2px 23px; font-size:11px; }"
+            "QPushButton:hover { color:#254f8a; }"
+        )
+        reminder_layout.addWidget(self.reminder_expand_button)
+        self.reminder_details = QWidget()
+        details_layout = QVBoxLayout(self.reminder_details)
+        details_layout.setContentsMargins(23, 2, 0, 1)
+        details_layout.setSpacing(4)
         reminder_time_row = QHBoxLayout()
         reminder_time_row.setContentsMargins(0, 0, 0, 0)
         reminder_time_row.addWidget(QLabel("提醒时间"))
         reminder_time_row.addWidget(self.reminder_timing_combo, 1)
-        reminder_layout.addLayout(reminder_time_row)
+        details_layout.addLayout(reminder_time_row)
+        self.reminder_repeat_check = QCheckBox("关闭后继续提醒")
+        self.reminder_repeat_check.setChecked(reminder_repeat_minutes > 0 and reminder_repeat_limit > 0)
+        self.reminder_repeat_check.setToolTip("每次关闭提醒后，按设定间隔再次显示，直到达到次数上限。")
+        details_layout.addWidget(self.reminder_repeat_check)
+        self.reminder_repeat_row = QWidget()
+        repeat_row = QHBoxLayout(self.reminder_repeat_row)
+        repeat_row.setContentsMargins(23, 0, 0, 0)
+        repeat_row.setSpacing(5)
+        repeat_row.addWidget(QLabel("间隔"))
+        self.reminder_repeat_interval_combo = NoWheelComboBox()
+        for label, minutes in (("10 分钟", 10), ("30 分钟", 30), ("1 小时", 60), ("2 小时", 120)):
+            self.reminder_repeat_interval_combo.addItem(label, minutes)
+        self.reminder_repeat_interval_combo.setCurrentIndex(
+            max(0, self.reminder_repeat_interval_combo.findData(reminder_repeat_minutes or 30))
+        )
+        repeat_row.addWidget(self.reminder_repeat_interval_combo)
+        repeat_row.addWidget(QLabel("重复"))
+        self.reminder_repeat_limit_combo = NoWheelComboBox()
+        for label, count in (("1 次", 1), ("2 次", 2), ("3 次", 3), ("5 次", 5)):
+            self.reminder_repeat_limit_combo.addItem(label, count)
+        self.reminder_repeat_limit_combo.setCurrentIndex(
+            max(0, self.reminder_repeat_limit_combo.findData(reminder_repeat_limit or 2))
+        )
+        repeat_row.addWidget(self.reminder_repeat_limit_combo)
+        repeat_row.addStretch()
+        details_layout.addWidget(self.reminder_repeat_row)
+        repeat_hint = QLabel("“稍后提醒”始终从你点击的此刻开始计算；此处只设置关闭提醒后的自动再次提醒。")
+        repeat_hint.setWordWrap(True)
+        repeat_hint.setStyleSheet("font-size:10px; color:#8793a2; background:transparent;")
+        details_layout.addWidget(repeat_hint)
+        reminder_layout.addWidget(self.reminder_details)
         self.hour_combo = NoWheelComboBox()
         for hour in TIME_HOURS:
             self.hour_combo.addItem(f"{hour:02d} 时", hour)
@@ -227,9 +270,10 @@ class TaskDialog(QDialog):
         time_box.addStretch()
         self._sync_windows_reminder_availability(self.time_enabled.isChecked())
         self.time_enabled.toggled.connect(self._sync_windows_reminder_availability)
-        self.reminder_mode_combo.currentIndexChanged.connect(
-            lambda _index: self._sync_windows_reminder_availability(self.time_enabled.isChecked())
-        )
+        self.important_reminder_check.toggled.connect(self._sync_windows_reminder_availability)
+        self.important_reminder_check.toggled.connect(self._refresh_reminder_details)
+        self.reminder_expand_button.toggled.connect(self._refresh_reminder_details)
+        self.reminder_repeat_check.toggled.connect(self._refresh_reminder_details)
 
         self.fixed_check = QCheckBox("固定锁住待办（显示在当天列表最底部）")
         self.fixed_check.setChecked(bool(task and task["is_fixed"]))
@@ -293,10 +337,18 @@ class TaskDialog(QDialog):
             "task_date": self.date_edit.date().toString("yyyy-MM-dd"),
             "due_time": due_time,
             "is_fixed": self.fixed_check.isChecked(),
-            "windows_reminder_enabled": bool(due_time) and bool(self.reminder_mode_combo.currentData()),
+            "windows_reminder_enabled": bool(due_time) and self.important_reminder_check.isChecked(),
             "important_reminder_offset_minutes": (
                 int(self.reminder_timing_combo.currentData())
-                if due_time and self.reminder_mode_combo.currentData() else 0
+                if due_time and self.important_reminder_check.isChecked() else 0
+            ),
+            "important_repeat_minutes": (
+                int(self.reminder_repeat_interval_combo.currentData())
+                if due_time and self.important_reminder_check.isChecked() and self.reminder_repeat_check.isChecked() else 0
+            ),
+            "important_repeat_limit": (
+                int(self.reminder_repeat_limit_combo.currentData())
+                if due_time and self.important_reminder_check.isChecked() and self.reminder_repeat_check.isChecked() else 0
             ),
             "steps": self.steps_editor.values(),
             "content_mode": "notes",
@@ -304,10 +356,23 @@ class TaskDialog(QDialog):
 
     def _sync_windows_reminder_availability(self, enabled: bool) -> None:
         """Keep reminder choices tied to a real task date and time."""
-        self.reminder_mode_combo.setEnabled(enabled)
+        self.important_reminder_check.setEnabled(enabled)
         if not enabled:
-            self.reminder_mode_combo.setCurrentIndex(0)
-        self.reminder_timing_combo.setEnabled(enabled and bool(self.reminder_mode_combo.currentData()))
+            self.important_reminder_check.setChecked(False)
+        active = enabled and self.important_reminder_check.isChecked()
+        self.reminder_expand_button.setEnabled(active)
+        self.reminder_timing_combo.setEnabled(active)
+        self.reminder_repeat_check.setEnabled(active)
+        self.reminder_repeat_interval_combo.setEnabled(active and self.reminder_repeat_check.isChecked())
+        self.reminder_repeat_limit_combo.setEnabled(active and self.reminder_repeat_check.isChecked())
+        self._refresh_reminder_details()
+
+    def _refresh_reminder_details(self, *_unused) -> None:
+        active = self.time_enabled.isChecked() and self.important_reminder_check.isChecked()
+        expanded = active and self.reminder_expand_button.isChecked()
+        self.reminder_details.setVisible(expanded)
+        self.reminder_repeat_row.setVisible(expanded and self.reminder_repeat_check.isChecked())
+        self.reminder_expand_button.setText("收起提醒设置" if expanded else "展开提醒设置")
 
     def duplicate_requested(self) -> bool:
         return self._duplicate_requested

@@ -1,4 +1,4 @@
-"""Focused V4.6 regression checks for settings, reminders, and task views."""
+"""Focused V4.6.1 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -327,10 +327,10 @@ class V200Tests(unittest.TestCase):
 
     def test_windows_reminder_choice_stays_visible_until_time_is_selected(self) -> None:
         dialog = TaskDialog()
-        self.assertFalse(dialog.reminder_mode_combo.isHidden())
-        self.assertFalse(dialog.reminder_mode_combo.isEnabled())
+        self.assertFalse(dialog.important_reminder_check.isHidden())
+        self.assertFalse(dialog.important_reminder_check.isEnabled())
         dialog.time_enabled.setChecked(True)
-        self.assertTrue(dialog.reminder_mode_combo.isEnabled())
+        self.assertTrue(dialog.important_reminder_check.isEnabled())
 
     def test_settings_dirty_state_and_no_wheel_controls(self) -> None:
         dialog = SettingsDialog(self.db, list(MainWindow.DEFAULT_GREETINGS))
@@ -496,15 +496,20 @@ class V200Tests(unittest.TestCase):
 
     def test_important_reminder_selection_is_opt_in_and_requires_a_time(self) -> None:
         dialog = TaskDialog()
-        self.assertFalse(dialog.reminder_mode_combo.isHidden())
-        self.assertFalse(dialog.reminder_mode_combo.isEnabled())
-        self.assertFalse(bool(dialog.reminder_mode_combo.currentData()))
+        self.assertFalse(dialog.important_reminder_check.isHidden())
+        self.assertFalse(dialog.important_reminder_check.isEnabled())
+        self.assertFalse(dialog.important_reminder_check.isChecked())
         dialog.time_enabled.setChecked(True)
-        self.assertTrue(dialog.reminder_mode_combo.isEnabled())
-        dialog.reminder_mode_combo.setCurrentIndex(1)
+        self.assertTrue(dialog.important_reminder_check.isEnabled())
+        dialog.important_reminder_check.setChecked(True)
         dialog.reminder_timing_combo.setCurrentIndex(dialog.reminder_timing_combo.findData(30))
+        dialog.reminder_repeat_check.setChecked(True)
+        dialog.reminder_repeat_interval_combo.setCurrentIndex(dialog.reminder_repeat_interval_combo.findData(10))
+        dialog.reminder_repeat_limit_combo.setCurrentIndex(dialog.reminder_repeat_limit_combo.findData(3))
         self.assertTrue(dialog.values()["windows_reminder_enabled"])
         self.assertEqual(dialog.values()["important_reminder_offset_minutes"], 30)
+        self.assertEqual(dialog.values()["important_repeat_minutes"], 10)
+        self.assertEqual(dialog.values()["important_repeat_limit"], 3)
         dialog.time_enabled.setChecked(False)
         self.assertFalse(dialog.values()["windows_reminder_enabled"])
 
@@ -560,6 +565,20 @@ class V200Tests(unittest.TestCase):
             [important],
         )
         self.assertEqual(self.db.task_by_id(important)["is_completed"], 0)
+
+    def test_important_reminder_can_repeat_after_a_close(self) -> None:
+        important = self.db.add_task(
+            "签合同", "等对方确认", "2026-09-01", "10:00", False, True,
+            important_repeat_minutes=30, important_repeat_limit=2,
+        )
+        now = datetime(2026, 9, 1, 10, 1)
+        self.assertTrue(self.db.dismiss_or_repeat_important_reminder(important, now))
+        self.assertEqual(self.db.pending_important_reminder_tasks(datetime(2026, 9, 1, 10, 30)), [])
+        self.assertEqual(
+            [task["id"] for task in self.db.pending_important_reminder_tasks(datetime(2026, 9, 1, 10, 31))],
+            [important],
+        )
+        self.assertEqual(self.db.task_by_id(important)["important_repeat_count"], 1)
 
     def test_task_steps_are_optional_and_keep_parent_completion_separate(self) -> None:
         task_id = self.db.add_task("完成报价", "", "2026-09-01", None, False)

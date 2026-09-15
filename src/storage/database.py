@@ -9,7 +9,7 @@ from typing import Any, Iterable
 
 
 class Database:
-    SCHEMA_VERSION = 8
+    SCHEMA_VERSION = 9
 
     def __init__(self, path: Path) -> None:
         self.connection = sqlite3.connect(path)
@@ -142,6 +142,16 @@ class Database:
                     "ALTER TABLE tasks ADD COLUMN important_reminder_offset_minutes INTEGER NOT NULL DEFAULT 0"
                 )
             version = 8
+        if version < 9:
+            columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(tasks)")}
+            for column, definition in (
+                ("important_repeat_minutes", "INTEGER NOT NULL DEFAULT 0"),
+                ("important_repeat_limit", "INTEGER NOT NULL DEFAULT 0"),
+                ("important_repeat_count", "INTEGER NOT NULL DEFAULT 0"),
+            ):
+                if column not in columns:
+                    self.connection.execute(f"ALTER TABLE tasks ADD COLUMN {column} {definition}")
+            version = 9
         self.connection.execute(
             "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)",
             (str(version),),
@@ -175,17 +185,21 @@ class Database:
         is_fixed: bool,
         windows_reminder_enabled: bool = False,
         important_reminder_offset_minutes: int = 0,
+        important_repeat_minutes: int = 0,
+        important_repeat_limit: int = 0,
         content_mode: str = "notes",
     ) -> int:
         now = datetime.now().isoformat(timespec="seconds")
         cursor = self.connection.execute(
             """INSERT INTO tasks(
                    title, notes, task_date, due_time, is_fixed, windows_reminder_enabled,
-                   important_reminder_offset_minutes, content_mode, created_at, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   important_reminder_offset_minutes, important_repeat_minutes, important_repeat_limit,
+                   content_mode, created_at, updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 title, notes, task_date, due_time, int(is_fixed), int(windows_reminder_enabled),
                 max(0, int(important_reminder_offset_minutes)),
+                max(0, int(important_repeat_minutes)), max(0, int(important_repeat_limit)),
                 "steps" if content_mode == "steps" else "notes", now, now,
             ),
         )
@@ -196,6 +210,7 @@ class Database:
         allowed = {
             "title", "notes", "task_date", "due_time", "is_fixed", "float_slot", "windows_reminder_enabled",
             "important_reminder_offset_minutes",
+            "important_repeat_minutes", "important_repeat_limit",
             "content_mode",
         }
         values = {key: value for key, value in fields.items() if key in allowed}
@@ -203,6 +218,9 @@ class Database:
             values["content_mode"] = "steps" if values["content_mode"] == "steps" else "notes"
         if "important_reminder_offset_minutes" in values:
             values["important_reminder_offset_minutes"] = max(0, int(values["important_reminder_offset_minutes"]))
+        for key in ("important_repeat_minutes", "important_repeat_limit"):
+            if key in values:
+                values[key] = max(0, int(values[key]))
         if not values:
             return
         # A rescheduled task is a new reminder schedule. Do not clear alert
@@ -221,6 +239,7 @@ class Database:
             values["due_alerted_at"] = None
             values["important_acknowledged_at"] = None
             values["important_snoozed_until"] = None
+            values["important_repeat_count"] = 0
         values["updated_at"] = datetime.now().isoformat(timespec="seconds")
         assignments = ", ".join(f"{key} = ?" for key in values)
         self.connection.execute(
@@ -400,6 +419,35 @@ class Database:
             (now, now, task_id),
         )
         self.connection.commit()
+
+    def dismiss_or_repeat_important_reminder(self, task_id: int, now: datetime | None = None) -> bool:
+        """Close an alert, or schedule its configured follow-up reminder.
+
+        Returns True when another reminder was scheduled.  Repetition only
+        begins after the user closes the visible alert; an unattended window
+        already remains on screen and therefore does not need duplicate popups.
+        """
+        task = self.task_by_id(task_id)
+        current = now or datetime.now()
+        if task is None:
+            return False
+        interval = int(task["important_repeat_minutes"] or 0)
+        limit = int(task["important_repeat_limit"] or 0)
+        count = int(task["important_repeat_count"] or 0)
+        if interval > 0 and limit > count:
+            self.connection.execute(
+                "UPDATE tasks SET important_repeat_count = ?, important_snoozed_until = ?, updated_at = ? WHERE id = ?",
+                (
+                    count + 1,
+                    (current + timedelta(minutes=interval)).isoformat(timespec="seconds"),
+                    current.isoformat(timespec="seconds"),
+                    task_id,
+                ),
+            )
+            self.connection.commit()
+            return True
+        self.acknowledge_important_reminder(task_id)
+        return False
 
     def snooze_important_reminder(self, task_id: int, minutes: int, now: datetime | None = None) -> None:
         """Hide one important alert briefly without marking its task complete."""
