@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 from PyQt6.QtCore import QDate, QTime, Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
@@ -23,7 +25,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ui.controls import CompactDatePicker, NoWheelComboBox, TIME_HOURS, TIME_MINUTES, normalize_note_text
+from ui.controls import CompactDatePicker, DurationPicker, NoWheelComboBox, TIME_HOURS, TIME_MINUTES, normalize_note_text
 from ui.task_steps import CompactStepStartButton, TaskStepsEditor
 from ui.theme import APP_STYLE
 
@@ -119,10 +121,12 @@ class TaskDialog(QDialog):
         notes_layout.setSpacing(0)
         notes_header = QHBoxLayout()
         notes_header.setContentsMargins(0, 0, 0, 2)
-        notes_header.addStretch()
+        notes_header.addStretch(1)
         self.add_step_button = CompactStepStartButton()
+        self.add_step_button.setMinimumWidth(210)
+        self.add_step_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.add_step_button.clicked.connect(self.steps_editor.start)
-        notes_header.addWidget(self.add_step_button)
+        notes_header.addWidget(self.add_step_button, 2)
         notes_layout.addLayout(notes_header)
         notes_content = QHBoxLayout()
         notes_content.setContentsMargins(0, 0, 0, 0)
@@ -176,7 +180,8 @@ class TaskDialog(QDialog):
         self.important_reminder_check = QCheckBox("启用重要提醒")
         self.important_reminder_check.setChecked(reminder_enabled)
         self.important_reminder_check.setToolTip("勾选后，软件会在右下角显示置顶提醒；提醒可关闭或稍后提醒。")
-        self._reminder_choice = "custom" if reminder_at else f"offset:{reminder_offset}"
+        self._reminder_basis = "from_now" if reminder_at else "task_time"
+        self._reminder_choice = f"offset:{reminder_offset}" if reminder_offset in (0, 10, 30) else "custom"
         self.windows_reminder_box = QFrame()
         self.windows_reminder_box.setObjectName("windowsReminderBox")
         self.windows_reminder_box.setStyleSheet(
@@ -194,13 +199,31 @@ class TaskDialog(QDialog):
         details_layout = QVBoxLayout(self.reminder_details)
         details_layout.setContentsMargins(23, 2, 0, 1)
         details_layout.setSpacing(4)
-        details_layout.addWidget(QLabel("提醒我"))
-        choice_row = QHBoxLayout()
+        basis_row = QHBoxLayout()
+        basis_row.setContentsMargins(0, 0, 0, 0)
+        basis_row.addWidget(QLabel("提醒基准"))
+        self.reminder_basis_group = QButtonGroup(self)
+        self.reminder_basis_buttons: dict[str, QPushButton] = {}
+        for key, label in (("task_time", "按事项时间"), ("from_now", "从现在起")):
+            button = QPushButton(label)
+            button.setCheckable(True)
+            button.setStyleSheet(
+                "QPushButton { border:1px solid #b8cbe7; border-radius:7px; color:#476b9e; background:#fff; padding:5px 8px; font-size:11px; }"
+                "QPushButton:checked { color:#fff; background:#5d82bb; border-color:#5d82bb; }"
+            )
+            self.reminder_basis_group.addButton(button)
+            self.reminder_basis_buttons[key] = button
+            button.clicked.connect(lambda _checked=False, value=key: self._choose_reminder_basis(value))
+            basis_row.addWidget(button)
+        basis_row.addStretch()
+        details_layout.addLayout(basis_row)
+        self.task_time_choices = QWidget()
+        choice_row = QHBoxLayout(self.task_time_choices)
         choice_row.setContentsMargins(0, 0, 0, 0)
         choice_row.setSpacing(5)
         self.reminder_choice_group = QButtonGroup(self)
         self.reminder_choice_buttons: dict[str, QPushButton] = {}
-        for key, label in (("offset:0", "准点"), ("offset:10", "提前 10 分"), ("offset:30", "提前 30 分"), ("offset:60", "提前 1 小时"), ("offset:1440", "提前 1 天"), ("custom", "自定义")):
+        for key, label in (("offset:0", "准点"), ("offset:10", "提前 10 分"), ("offset:30", "提前半小时"), ("custom", "自定义")):
             button = QPushButton(label)
             button.setCheckable(True)
             button.setStyleSheet(
@@ -212,30 +235,23 @@ class TaskDialog(QDialog):
             button.clicked.connect(lambda _checked=False, value=key: self._choose_reminder(value))
             choice_row.addWidget(button)
         choice_row.addStretch()
-        details_layout.addLayout(choice_row)
+        details_layout.addWidget(self.task_time_choices)
         self.custom_reminder_row = QWidget()
         custom_row = QHBoxLayout(self.custom_reminder_row)
         custom_row.setContentsMargins(0, 0, 0, 0)
         custom_row.setSpacing(5)
-        custom_row.addWidget(QLabel("自定义时间"))
-        self.custom_reminder_date = CompactDatePicker(selected)
-        self.custom_reminder_hour = NoWheelComboBox()
-        self.custom_reminder_minute = NoWheelComboBox()
-        for hour in TIME_HOURS:
-            self.custom_reminder_hour.addItem(f"{hour:02d} 时", hour)
-        for minute in TIME_MINUTES:
-            self.custom_reminder_minute.addItem(f"{minute:02d} 分", minute)
+        self.reminder_duration_label = QLabel("提前")
+        custom_row.addWidget(self.reminder_duration_label)
+        self.reminder_duration = DurationPicker()
         if reminder_at:
-            reminder_date, reminder_time = str(reminder_at).split(" ", 1)
-            self.custom_reminder_date.setDate(QDate.fromString(reminder_date, "yyyy-MM-dd"))
-            hour, minute = reminder_time.split(":", 1)
-            self.custom_reminder_hour.setCurrentIndex(max(0, self.custom_reminder_hour.findData(int(hour))))
-            self.custom_reminder_minute.setCurrentIndex(max(0, self.custom_reminder_minute.findData(int(minute))))
+            try:
+                target = datetime.strptime(str(reminder_at), "%Y-%m-%d %H:%M")
+                self.reminder_duration.set_minutes_value(max(0, int((target - datetime.now()).total_seconds() // 60)))
+            except ValueError:
+                pass
         else:
-            self.custom_reminder_hour.setCurrentIndex(max(0, self.custom_reminder_hour.findData(QTime.currentTime().hour())))
-        custom_row.addWidget(self.custom_reminder_date)
-        custom_row.addWidget(self.custom_reminder_hour)
-        custom_row.addWidget(self.custom_reminder_minute)
+            self.reminder_duration.set_minutes_value(reminder_offset if self._reminder_choice == "custom" else 0)
+        custom_row.addWidget(self.reminder_duration)
         custom_row.addStretch()
         details_layout.addWidget(self.custom_reminder_row)
         reminder_layout.addWidget(self.reminder_details)
@@ -307,6 +323,7 @@ class TaskDialog(QDialog):
         self.recurrence_combo.currentIndexChanged.connect(self._refresh_recurrence_details)
         self._refresh_recurrence_details()
         self._choose_reminder(self._reminder_choice)
+        self._choose_reminder_basis(self._reminder_basis)
 
         self.fixed_check = QCheckBox("固定锁住待办（显示在当天列表最底部）")
         self.fixed_check.setChecked(bool(task and task["is_fixed"]))
@@ -365,8 +382,8 @@ class TaskDialog(QDialog):
         due_time = None
         if self.time_enabled.isChecked():
             due_time = f"{self.hour_combo.currentData():02d}:{self.minute_combo.currentData():02d}"
-        reminder_custom = self._reminder_choice == "custom"
-        reminder_enabled = self.important_reminder_check.isChecked() and (bool(due_time) or reminder_custom)
+        task_time_reminder = self._reminder_basis == "task_time"
+        reminder_enabled = self.important_reminder_check.isChecked() and (bool(due_time) if task_time_reminder else True)
         return {
             "title": self.title_edit.toPlainText().strip(),
             "notes": normalize_note_text(self.notes_edit.toPlainText()).strip(),
@@ -375,13 +392,13 @@ class TaskDialog(QDialog):
             "is_fixed": self.fixed_check.isChecked(),
             "windows_reminder_enabled": reminder_enabled,
             "important_reminder_offset_minutes": (
-                int(self._reminder_choice.split(":", 1)[1])
-                if reminder_enabled and not reminder_custom else 0
+                (self.reminder_duration.minutes_value() if self._reminder_choice == "custom"
+                 else int(self._reminder_choice.split(":", 1)[1]))
+                if reminder_enabled and task_time_reminder else 0
             ),
             "important_reminder_at": (
-                f"{self.custom_reminder_date.date().toString('yyyy-MM-dd')} "
-                f"{self.custom_reminder_hour.currentData():02d}:{self.custom_reminder_minute.currentData():02d}"
-                if reminder_enabled and reminder_custom else None
+                (datetime.now() + timedelta(minutes=self.reminder_duration.minutes_value())).strftime("%Y-%m-%d %H:%M")
+                if reminder_enabled and not task_time_reminder else None
             ),
             "recurrence_unit": (
                 self.recurrence_unit_combo.currentData()
@@ -393,22 +410,29 @@ class TaskDialog(QDialog):
         }
 
     def _sync_windows_reminder_availability(self, enabled: bool) -> None:
-        """An exact custom reminder can exist even when the task has no due time."""
-        active = self.important_reminder_check.isChecked()
-        self.reminder_choice_buttons["offset:0"].setEnabled(enabled)
-        if not enabled and self._reminder_choice.startswith("offset:"):
-            self._choose_reminder("custom")
+        """A from-now reminder needs no task time; task-time reminders do."""
+        self.reminder_basis_buttons["task_time"].setEnabled(enabled)
+        if not enabled and self._reminder_basis == "task_time":
+            self._choose_reminder_basis("from_now")
         self._refresh_reminder_details()
 
     def _refresh_reminder_details(self, *_unused) -> None:
         active = self.important_reminder_check.isChecked()
+        task_time = self._reminder_basis == "task_time"
         self.reminder_details.setVisible(active)
-        self.custom_reminder_row.setVisible(active and self._reminder_choice == "custom")
+        self.task_time_choices.setVisible(active and task_time)
+        self.reminder_duration_label.setText("提前" if task_time else "从现在起")
+        self.custom_reminder_row.setVisible(active and (not task_time or self._reminder_choice == "custom"))
 
     def _choose_reminder(self, value: str) -> None:
         self._reminder_choice = value
         button = self.reminder_choice_buttons[value]
         button.setChecked(True)
+        self._refresh_reminder_details()
+
+    def _choose_reminder_basis(self, value: str) -> None:
+        self._reminder_basis = value
+        self.reminder_basis_buttons[value].setChecked(True)
         self._refresh_reminder_details()
 
     def _refresh_recurrence_details(self, *_unused) -> None:

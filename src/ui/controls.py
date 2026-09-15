@@ -51,6 +51,49 @@ class NoWheelTimeEdit(NoWheelMixin, QTimeEdit):
     pass
 
 
+class DurationPicker(QWidget):
+    """Relative day/hour/minute picker used for reminder offsets."""
+
+    valueChanged = pyqtSignal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        self.days = NoWheelComboBox()
+        self.hours = NoWheelComboBox()
+        self.minutes = NoWheelComboBox()
+        for value in range(0, 31):
+            self.days.addItem(f"{value} 天", value)
+        for value in range(0, 24):
+            self.hours.addItem(f"{value} 时", value)
+        for value in TIME_MINUTES:
+            self.minutes.addItem(f"{value} 分", value)
+        layout.addWidget(self.days)
+        layout.addWidget(self.hours)
+        layout.addWidget(self.minutes)
+        layout.addStretch()
+        self.days.currentIndexChanged.connect(self.valueChanged)
+        self.hours.currentIndexChanged.connect(self.valueChanged)
+        self.minutes.currentIndexChanged.connect(self.valueChanged)
+
+    def minutes_value(self) -> int:
+        return int(self.days.currentData()) * 1440 + int(self.hours.currentData()) * 60 + int(self.minutes.currentData())
+
+    def set_minutes_value(self, minutes: int) -> None:
+        total = max(0, int(minutes))
+        days, remainder = divmod(total, 1440)
+        hours, minutes = divmod(remainder, 60)
+        self.days.setCurrentIndex(max(0, self.days.findData(min(30, days))))
+        self.hours.setCurrentIndex(max(0, self.hours.findData(hours)))
+        minute_index = self.minutes.findData(minutes)
+        if minute_index < 0:
+            self.minutes.addItem(f"{minutes} 分", minutes)
+            minute_index = self.minutes.count() - 1
+        self.minutes.setCurrentIndex(minute_index)
+
+
 class WeekDatePickerPanel(QWidget):
     """A compact seven-day selector, with typing reserved for date jumps."""
 

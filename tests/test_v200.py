@@ -1,4 +1,4 @@
-"""Focused V4.6.2 regression checks for settings, reminders, and task views."""
+"""Focused V4.6.3 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -494,7 +494,7 @@ class V200Tests(unittest.TestCase):
         self.assertEqual(dialog.notes_edit.toPlainText(), task["notes"])
         self.assertEqual(dialog.values()["notes"], task["notes"])
 
-    def test_important_reminder_selection_is_opt_in_and_requires_a_time(self) -> None:
+    def test_important_reminder_offers_task_time_and_from_now_modes(self) -> None:
         dialog = TaskDialog()
         self.assertFalse(dialog.important_reminder_check.isHidden())
         self.assertTrue(dialog.important_reminder_check.isEnabled())
@@ -502,9 +502,14 @@ class V200Tests(unittest.TestCase):
         dialog.time_enabled.setChecked(True)
         self.assertTrue(dialog.important_reminder_check.isEnabled())
         dialog.important_reminder_check.setChecked(True)
+        dialog._choose_reminder_basis("task_time")
         dialog._choose_reminder("offset:30")
         self.assertTrue(dialog.values()["windows_reminder_enabled"])
         self.assertEqual(dialog.values()["important_reminder_offset_minutes"], 30)
+        self.assertIsNone(dialog.values()["important_reminder_at"])
+        dialog._choose_reminder("custom")
+        dialog.reminder_duration.set_minutes_value(2 * 1440 + 3 * 60 + 30)
+        self.assertEqual(dialog.values()["important_reminder_offset_minutes"], 2 * 1440 + 3 * 60 + 30)
         dialog.time_enabled.setChecked(False)
         self.assertTrue(dialog.values()["windows_reminder_enabled"])
         self.assertIsNotNone(dialog.values()["important_reminder_at"])
