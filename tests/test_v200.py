@@ -580,9 +580,12 @@ class V200Tests(unittest.TestCase):
         self.assertEqual(row.height(), capped_height)
         row._set_editing(False)
         QApplication.instance().processEvents()
-        self.assertGreater(row.height(), one_line_height)
+        self.assertEqual(row.height(), capped_height)
         row.edit.setPlainText("只有一行")
-        self.assertEqual(row.height(), one_line_height)
+        self.assertEqual(row.height(), editing_height)
+        reloaded = TaskStepsEditor()
+        reloaded.set_steps([{"content": "只有一行", "is_completed": False}])
+        self.assertEqual(reloaded._rows()[0].height(), one_line_height)
 
     def test_v457_step_enter_advances_and_split_remains_available(self) -> None:
         editor = TaskStepsEditor()

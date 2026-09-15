@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 
-from PyQt6.QtCore import QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox, QFrame, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
@@ -61,6 +61,7 @@ class _StepRow(QWidget):
         shell_layout.setSpacing(0)
         self.edit = _StepTextEdit()
         self._editing = False
+        self._edited_this_session = False
         self.edit.setPlainText(content)
         self.edit.setPlaceholderText("例如：核对报价、盖章确认、提交报告；可继续换行补充")
         self.edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -98,13 +99,12 @@ class _StepRow(QWidget):
 
     def _set_editing(self, focused: bool) -> None:
         self._editing = focused
+        if focused:
+            # Enter confirms a row by moving focus onward. That must not turn
+            # a row the user just edited back into a one-line browse field.
+            self._edited_this_session = True
         self._refresh_focus_border(focused)
         self._refresh_height()
-        if not focused:
-            # QTextDocument completes line layout after focus processing on
-            # some platform styles. Recheck once that finishes so a genuine
-            # two-line step cannot collapse to one scrollable line.
-            QTimer.singleShot(0, self._refresh_height)
 
     def _refresh_focus_border(self, focused: bool) -> None:
         color = "#7f9cf1" if focused else "#d8e1ee"
@@ -118,15 +118,16 @@ class _StepRow(QWidget):
     def _refresh_height(self) -> None:
         """Use calm browse/edit states instead of resizing on every typed line.
 
-        Saved steps browse at their real number of lines.  Focusing any step,
-        even an old one-line step, reserves a stable three-line writing area.
-        Only explicit Shift/Alt+Enter line breaks beyond that grow the editor,
-        capped at four-and-a-half lines with an internal scrollbar.
+        Freshly loaded steps browse at their real number of lines. Once a row
+        is edited, it keeps a stable three-line area for this editing session,
+        even after Enter moves to another field. Saving and reopening resets
+        it to the actual saved line count. Explicit Shift/Alt+Enter line
+        breaks beyond that grow the editor, capped at four-and-a-half lines.
         """
         line_height = max(1, self.edit.fontMetrics().lineSpacing())
         stored_lines = max(1, self.edit.document().blockCount())
         visible_lines = float(stored_lines)
-        if self._editing:
+        if self._editing or self._edited_this_session:
             visible_lines = max(3.0, visible_lines)
         visible_lines = min(4.5, visible_lines)
         height = math.ceil(visible_lines * line_height) + 18
