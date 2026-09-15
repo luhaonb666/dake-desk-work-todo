@@ -76,8 +76,8 @@ class ImportantReminderWindow(QWidget):
         snooze_row.setContentsMargins(0, 0, 0, 0)
         snooze_row.setSpacing(7)
         for minutes in (10, 30):
-            button = QPushButton(f"{minutes} 分钟后提醒")
-            button.setToolTip("届时会再次显示这条软件内置顶提醒。")
+            button = QPushButton(f"从现在起 {minutes} 分钟后")
+            button.setToolTip("从点击这一刻开始计算，届时会再次显示这条软件内置顶提醒。")
             button.setStyleSheet(
                 "QPushButton { background:#fffdf8; border:1px solid #d9b979; border-radius:9px; color:#8a5600; padding:7px 9px; }"
                 "QPushButton:hover { background:#fff0cd; }"
