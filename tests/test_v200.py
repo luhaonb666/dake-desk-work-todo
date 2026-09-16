@@ -1,4 +1,4 @@
-"""Focused V4.6.8 regression checks for settings, reminders, and task views."""
+"""Focused V4.6.9 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from services.windows_notifications import planned_reminders
 from ui.main_window import ExpandableNotesWidget, ExpandableStepsPreview, FadedPreviewLine, MainWindow
 from ui.float_window import FloatCard, FloatWindow
 from ui.controls import CompactDatePicker, normalize_note_text
-from ui.desktop_note import DesktopNoteWindow
+from ui.desktop_note import DesktopNoteDialog, DesktopNoteWindow
 from ui.important_reminder import ImportantReminderWindow
 from ui.settings_dialog import GuidedTimeCombo, SettingsDialog
 from ui.task_dialog import PlainNotesEditor, TaskDialog
@@ -794,15 +794,32 @@ class V200Tests(unittest.TestCase):
         self.assertIn("拆成步骤", dialog.import_steps_button.text())
         self.assertEqual(dialog.import_steps_rail.width(), 72)
 
-    def test_v453_workspace_body_uses_three_stable_step_height_tiers(self) -> None:
+    def test_v469_workspace_body_is_the_only_flexible_editor_area(self) -> None:
         editor = WorkspaceEditor()
-        self.assertEqual(editor.notes_edit.height(), 380)
+        self.assertEqual(editor.title_edit.height(), 56)
+        self.assertGreaterEqual(editor.notes_edit.minimumHeight(), 170)
         editor.steps_editor.start()
-        self.assertEqual(editor.notes_edit.height(), 230)
+        self.assertGreaterEqual(editor.notes_edit.minimumHeight(), 170)
         editor.steps_editor.add_row(focus=False)
-        self.assertEqual(editor.notes_edit.height(), 170)
+        self.assertGreaterEqual(editor.notes_edit.minimumHeight(), 170)
         editor.steps_editor.remove_row(editor.steps_editor._rows()[1])
-        self.assertEqual(editor.notes_edit.height(), 230)
+        self.assertGreaterEqual(editor.notes_edit.minimumHeight(), 170)
+
+    def test_v469_complex_reminder_disables_simple_reminder_choices(self) -> None:
+        dialog = TaskDialog()
+        dialog.important_reminder_check.setChecked(True)
+        dialog.important_schedule._set_mode("deadline")
+        dialog._refresh_quick_reminder_controls()
+        self.assertFalse(dialog.quick_reminder_buttons[0].isEnabled())
+        self.assertFalse(dialog.quick_reminder_custom.isEnabled())
+        self.assertIn("简单提醒不可叠加", dialog.quick_reminder_notice.text())
+        self.assertEqual(dialog.important_schedule.mode_buttons["deadline"].text(), "目标日提醒")
+        self.assertGreaterEqual(dialog.open_important_editor_button.minimumWidth(), 190)
+
+    def test_v469_note_management_no_longer_offers_summary_folding(self) -> None:
+        note = DesktopNoteDialog({"text": "第一行\n" * 9, "color": "warm_yellow", "fold_long_content": True}, True)
+        self.assertFalse(hasattr(note, "fold"))
+        self.assertFalse(note.values()["fold_long_content"])
 
     def test_v453_desktop_note_is_not_a_global_topmost_window(self) -> None:
         note = DesktopNoteWindow()

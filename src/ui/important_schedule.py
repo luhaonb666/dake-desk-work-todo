@@ -36,7 +36,7 @@ class ImportantReminderSchedule(QFrame):
         self.mode_buttons: dict[str, QPushButton] = {}
         group = QButtonGroup(self)
         group.setExclusive(True)
-        for key, label in (("follow", "跟随事项时间"), ("deadline", "提前持续提醒"), ("weekly", "周期提醒")):
+        for key, label in (("follow", "跟随事项时间"), ("deadline", "目标日提醒"), ("weekly", "周期提醒")):
             button = QPushButton(label)
             button.setCheckable(True)
             button.setStyleSheet(

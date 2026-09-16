@@ -26,7 +26,7 @@ class ImportantReminderWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.setFixedWidth(332)
         self.setStyleSheet(
-            "QWidget#importantReminderWindow { background:#ffffff; border:2px solid #d5e0ef; border-radius:16px; }"
+            "QWidget#importantReminderWindow { background:#fffdf8; border:2px solid #ead9ba; border-radius:20px; }"
         )
 
         layout = QVBoxLayout(self)
@@ -46,7 +46,7 @@ class ImportantReminderWindow(QWidget):
         self.close_button.setFixedSize(24, 24)
         self.close_button.setStyleSheet(
             "QPushButton { color:#667085; background:transparent; border:none; font-size:22px; padding:0; }"
-            "QPushButton:hover { color:#3d4d61; background:#f2f6fb; border-radius:12px; }"
+            "QPushButton:hover { color:#3d4d61; background:#faf3e7; border-radius:12px; }"
         )
         self.close_button.clicked.connect(self._dismiss_current)
         heading.addWidget(self.close_button)
@@ -67,7 +67,7 @@ class ImportantReminderWindow(QWidget):
 
         divider = QFrame()
         divider.setFrameShape(QFrame.Shape.HLine)
-        divider.setStyleSheet("color:#e2e9f2; border:none; background:#e2e9f2; max-height:1px;")
+        divider.setStyleSheet("color:#eee3d2; border:none; background:#eee3d2; max-height:1px;")
         layout.addWidget(divider)
         hint = QLabel("暂时没空可稍后提醒；关闭提醒不会完成待办。")
         hint.setStyleSheet("font-size:11px; color:#718096; background:transparent; border:none;")
@@ -79,8 +79,8 @@ class ImportantReminderWindow(QWidget):
             button = QPushButton(f"从现在起 {minutes} 分钟后")
             button.setToolTip("从点击这一刻开始计算，届时会再次显示这条软件内置顶提醒。")
             button.setStyleSheet(
-                "QPushButton { background:#ffffff; border:1px solid #d5e0ef; border-radius:9px; color:#566f91; padding:7px 9px; }"
-                "QPushButton:hover { background:#f2f6fb; border-color:#aebfda; }"
+                "QPushButton { background:#ffffff; border:1px solid #e3d2b5; border-radius:9px; color:#566f91; padding:7px 9px; }"
+                "QPushButton:hover { background:#faf3e7; border-color:#d0b98e; }"
             )
             button.clicked.connect(lambda _=False, value=minutes: self._snooze_current(value))
             snooze_row.addWidget(button)

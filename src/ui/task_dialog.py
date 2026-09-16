@@ -196,25 +196,35 @@ class TaskDialog(QDialog):
         reminder_layout = QVBoxLayout(self.windows_reminder_box)
         reminder_layout.setContentsMargins(10, 7, 10, 7)
         reminder_layout.setSpacing(5)
+        reminder_content = QWidget()
+        reminder_content_row = QHBoxLayout(reminder_content)
+        reminder_content_row.setContentsMargins(0, 0, 0, 0)
+        reminder_content_row.setSpacing(12)
+        reminder_left = QWidget()
+        self._reminder_left_layout = QVBoxLayout(reminder_left)
+        self._reminder_left_layout.setContentsMargins(0, 0, 0, 0)
+        self._reminder_left_layout.setSpacing(5)
+        reminder_content_row.addWidget(reminder_left, 1)
+        reminder_layout.addWidget(reminder_content)
         reminder_header = QHBoxLayout()
         reminder_header.setContentsMargins(0, 0, 0, 0)
         reminder_header.addWidget(self.important_reminder_check)
-        reminder_header.addStretch()
         self.open_important_editor_button = QPushButton("设置重要提醒")
         self.open_important_editor_button.setObjectName("importantReminderEditorButton")
         self.open_important_editor_button.setToolTip("在独立页面设置提醒时间与重复方式，不会改动待办日期或时间。")
         self.open_important_editor_button.clicked.connect(self._edit_important_reminder)
         self.open_important_editor_button.setStyleSheet(
-            "QPushButton#importantReminderEditorButton { min-width:150px; padding:6px 14px; color:#426b9f; "
+            "QPushButton#importantReminderEditorButton { min-width:190px; padding:10px 16px; color:#426b9f; "
             "background:#fff; border:1px solid #9db9df; border-radius:8px; font-weight:600; }"
             "QPushButton#importantReminderEditorButton:hover { background:#edf4ff; border-color:#6f95cf; }"
         )
-        reminder_header.addWidget(self.open_important_editor_button)
-        reminder_layout.addLayout(reminder_header)
+        self.open_important_editor_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        reminder_content_row.addWidget(self.open_important_editor_button, 0)
+        self._reminder_left_layout.addLayout(reminder_header)
         self.reminder_summary = QLabel("软件会在右下角置顶提醒；关闭提醒不会完成事项。")
         self.reminder_summary.setWordWrap(True)
         self.reminder_summary.setStyleSheet("font-size:11px; color:#718096; background:transparent; padding-left:23px;")
-        reminder_layout.addWidget(self.reminder_summary)
+        self._reminder_left_layout.addWidget(self.reminder_summary)
         self.reminder_details = QWidget()
         details_layout = QVBoxLayout(self.reminder_details)
         details_layout.setContentsMargins(23, 2, 0, 1)
@@ -271,16 +281,16 @@ class TaskDialog(QDialog):
         choice_row.addWidget(self.custom_offset_combo)
         choice_row.addStretch()
         details_layout.addWidget(self.task_time_choices)
-        reminder_layout.addWidget(self.reminder_details)
+        self._reminder_left_layout.addWidget(self.reminder_details)
         self.switch_to_reminder_button = QPushButton("设为提醒事件")
         self.switch_to_reminder_button.setObjectName("quietButton")
         self.switch_to_reminder_button.setToolTip("提醒事件可设置快捷提醒时间与重复规则；已有内容和分项步骤会保留。")
         self.switch_to_reminder_button.clicked.connect(lambda: self._set_event_type("reminder"))
-        reminder_layout.addWidget(self.switch_to_reminder_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self._reminder_left_layout.addWidget(self.switch_to_reminder_button, 0, Qt.AlignmentFlag.AlignLeft)
         self.important_schedule = ImportantReminderSchedule()
         self.important_schedule.load(task) if task else self.important_schedule.set_task_date(self.date_edit.date())
         self.important_schedule.changed.connect(self._mark_schedule_touched)
-        reminder_layout.addWidget(self.important_schedule)
+        self._reminder_left_layout.addWidget(self.important_schedule)
         self.quick_reminder_host = QWidget()
         quick_reminder_row = QHBoxLayout(self.quick_reminder_host)
         quick_reminder_row.setContentsMargins(23, 1, 0, 1)
@@ -309,7 +319,11 @@ class TaskDialog(QDialog):
         self.quick_reminder_custom.currentIndexChanged.connect(self._set_quick_custom_reminder)
         quick_reminder_row.addWidget(self.quick_reminder_custom)
         quick_reminder_row.addStretch()
-        reminder_layout.addWidget(self.quick_reminder_host)
+        self._reminder_left_layout.addWidget(self.quick_reminder_host)
+        self.quick_reminder_notice = QLabel()
+        self.quick_reminder_notice.setWordWrap(True)
+        self.quick_reminder_notice.setStyleSheet("font-size:11px; color:#718096; padding-left:23px;")
+        self._reminder_left_layout.addWidget(self.quick_reminder_notice)
         self.important_schedule.changed.connect(self._refresh_quick_reminder_controls)
         self.recurrence_box = QFrame()
         self.recurrence_box.setObjectName("recurrenceBox")
@@ -457,8 +471,10 @@ class TaskDialog(QDialog):
 
     def _refresh_import_button(self) -> None:
         text = self.notes_edit.toPlainText()
-        has_lines = bool([line for line in text.splitlines() if line.strip()])
-        self.import_steps_button.setEnabled(has_lines)
+        line_count = len([line for line in text.splitlines() if line.strip()])
+        can_split = line_count >= 2
+        self.import_steps_rail.setVisible(can_split)
+        self.import_steps_button.setEnabled(can_split)
         # Conversion stays available after every use: users often continue
         # editing the body and need to split its current lines again.
         self.import_steps_button.setText("⇩\n拆成步骤")
@@ -542,17 +558,27 @@ class TaskDialog(QDialog):
         if not hasattr(self, "quick_reminder_buttons"):
             return
         values = self.important_schedule.values()
+        mode = values["important_reminder_mode"]
+        complex_plan = self.important_reminder_check.isChecked() and mode in {"deadline", "weekly"}
         offset = (
             values["important_reminder_offset_minutes"]
-            if self.important_reminder_check.isChecked() and values["important_reminder_mode"] == "follow"
+            if self.important_reminder_check.isChecked() and mode == "follow"
             else None
         )
         for minutes, button in self.quick_reminder_buttons.items():
             button.setChecked(offset == minutes)
+            button.setEnabled(not complex_plan)
         self.quick_reminder_custom.blockSignals(True)
         index = self.quick_reminder_custom.findData(offset) if offset not in self.quick_reminder_buttons and offset else 0
         self.quick_reminder_custom.setCurrentIndex(index)
         self.quick_reminder_custom.blockSignals(False)
+        self.quick_reminder_custom.setEnabled(not complex_plan)
+        if complex_plan:
+            plan_name = "目标日提醒" if mode == "deadline" else "周期提醒"
+            self.quick_reminder_notice.setText(f"已启用{plan_name}；简单提醒不可叠加，请在“重要提醒设置”中修改。")
+        else:
+            self.quick_reminder_notice.clear()
+        self.quick_reminder_notice.setVisible(complex_plan)
 
     def _choose_reminder(self, value: str, *, touched: bool = True) -> None:
         self._reminder_choice = value

@@ -32,7 +32,9 @@ class DesktopNoteWindow(QWidget):
         super().__init__(parent)
         self._text = ""
         self._color = "warm_yellow"
-        self._fold_long_content = True
+        # A resizable note should show its own full content. Keep the old
+        # setting only for compatible reads; it no longer controls the view.
+        self._fold_long_content = False
         self._expanded = False
         self._editing = False
         self._drag_start: QPoint | None = None
@@ -114,7 +116,7 @@ class DesktopNoteWindow(QWidget):
     def set_note(self, text: str, color: str, fold_long_content: bool) -> None:
         self._text = str(text or "")
         self._color = color if color in NOTE_COLORS else "warm_yellow"
-        self._fold_long_content = bool(fold_long_content)
+        self._fold_long_content = False
         self._expanded = False
         if not self._editing:
             self.editor.setPlainText(self._text)
@@ -165,7 +167,7 @@ class DesktopNoteWindow(QWidget):
 
     def _refresh_view(self) -> None:
         lines = self._text.splitlines()
-        has_hidden = self._fold_long_content and len(lines) > self.FOLD_LINES
+        has_hidden = False
         if has_hidden and not self._expanded:
             self.view.setText("\n".join(lines[:self.FOLD_LINES]))
             self.fold_button.setText("↓ 展开全文")
@@ -254,9 +256,6 @@ class DesktopNoteDialog(QDialog):
         color_row.addWidget(self.color)
         color_row.addStretch()
         outer.addLayout(color_row)
-        self.fold = QCheckBox("长内容折叠显示（超过 8 行时显示摘要）")
-        self.fold.setChecked(bool(state.get("fold_long_content", True)))
-        outer.addWidget(self.fold)
         help_text = QLabel(
             "桌面操作：点“编辑与调整”后，拖动整个顶部栏可移动；右下角出现“↘ 拖动调整大小”，可直接改变宽高。"
         )
@@ -273,6 +272,6 @@ class DesktopNoteDialog(QDialog):
         return {
             "text": self.text_edit.toPlainText().strip(),
             "color": self.color.currentData(),
-            "fold_long_content": self.fold.isChecked(),
+            "fold_long_content": False,
             "visible": self.visible_check.isChecked(),
         }
