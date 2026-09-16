@@ -1,4 +1,4 @@
-"""Focused V4.6.7 regression checks for settings, reminders, and task views."""
+"""Focused V4.6.8 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -519,12 +519,23 @@ class V200Tests(unittest.TestCase):
 
     def test_v467_important_reminder_opens_from_a_focused_editor_entry(self) -> None:
         dialog = TaskDialog()
-        self.assertEqual(dialog.open_important_editor_button.text(), "设置重要提醒")
+        self.assertEqual(dialog.open_important_editor_button.text(), "重要提醒设置")
         self.assertTrue(dialog.important_schedule.isHidden())
         dialog.important_reminder_check.setChecked(True)
-        self.assertEqual(dialog.open_important_editor_button.text(), "修改重要提醒")
+        self.assertEqual(dialog.open_important_editor_button.text(), "重要提醒设置")
         self.assertTrue(dialog.important_schedule.isHidden())
         self.assertTrue(dialog.follow_up_button.isHidden())
+
+    def test_v468_quick_important_reminder_keeps_simple_offsets_in_the_main_editor(self) -> None:
+        dialog = TaskDialog()
+        dialog._set_quick_reminder_offset(30)
+        values = dialog.values()
+        self.assertTrue(values["windows_reminder_enabled"])
+        self.assertEqual(values["important_reminder_mode"], "follow")
+        self.assertEqual(values["important_reminder_offset_minutes"], 30)
+        self.assertTrue(dialog.time_enabled.isChecked())
+        self.assertTrue(dialog.quick_reminder_buttons[30].isChecked())
+        self.assertIn("需手动关闭", dialog.reminder_summary.text())
 
     def test_v467_deadline_target_is_independent_from_the_task_date(self) -> None:
         task_id = self.db.add_task(

@@ -260,6 +260,36 @@ class WorkspaceEditor(QWidget):
         self.important_schedule.changed.connect(self._mark_schedule_touched)
         self.important_schedule.changed.connect(self._refresh_status)
         reminder_layout.addWidget(self.important_schedule)
+        self.quick_reminder_host = QWidget()
+        quick_reminder_row = QHBoxLayout(self.quick_reminder_host)
+        quick_reminder_row.setContentsMargins(23, 1, 0, 1)
+        quick_reminder_row.setSpacing(5)
+        quick_reminder_row.addWidget(QLabel("简单提醒"))
+        self.quick_reminder_buttons: dict[int, QPushButton] = {}
+        self.quick_reminder_group = QButtonGroup(self)
+        for minutes, label in ((0, "准点"), (10, "提前 10 分"), (30, "提前半小时")):
+            button = QPushButton(label)
+            button.setCheckable(True)
+            button.setStyleSheet(
+                "QPushButton { border:1px solid #b8cbe7; border-radius:7px; color:#476b9e; background:#fff; padding:5px 8px; font-size:11px; }"
+                "QPushButton:checked { color:#fff; background:#5d82bb; border-color:#5d82bb; }"
+            )
+            button.clicked.connect(lambda _checked=False, value=minutes: self._set_quick_reminder_offset(value))
+            self.quick_reminder_group.addButton(button)
+            self.quick_reminder_buttons[minutes] = button
+            quick_reminder_row.addWidget(button)
+        self.quick_reminder_custom = NoWheelComboBox()
+        self.quick_reminder_custom.addItem("自定义 ▾", None)
+        for hours in range(1, 5):
+            self.quick_reminder_custom.addItem(f"提前 {hours} 小时", hours * 60)
+        self.quick_reminder_custom.setStyleSheet(
+            "QComboBox { border:1px solid #b8cbe7; border-radius:7px; color:#476b9e; background:#fff; padding:5px 8px; font-size:11px; }"
+        )
+        self.quick_reminder_custom.currentIndexChanged.connect(self._set_quick_custom_reminder)
+        quick_reminder_row.addWidget(self.quick_reminder_custom)
+        quick_reminder_row.addStretch()
+        reminder_layout.addWidget(self.quick_reminder_host)
+        self.important_schedule.changed.connect(self._refresh_quick_reminder_controls)
         self.time_enabled.toggled.connect(self._sync_windows_reminder_availability)
         self.important_reminder_check.toggled.connect(self._sync_windows_reminder_availability)
         self.important_reminder_check.toggled.connect(self._refresh_reminder_details)
@@ -413,7 +443,9 @@ class WorkspaceEditor(QWidget):
         self.reminder_basis_host.setVisible(False)
         self.task_time_choices.setVisible(False)
         self.important_schedule.setVisible(False)
-        self.open_important_editor_button.setText("修改重要提醒" if active else "设置重要提醒")
+        self.quick_reminder_host.setVisible(True)
+        self.open_important_editor_button.setText("重要提醒设置")
+        self._refresh_quick_reminder_controls()
 
     def _edit_important_reminder(self) -> None:
         dialog = ImportantReminderEditorDialog(self.date_edit.date(), self.important_schedule.values(), self)
@@ -426,6 +458,34 @@ class WorkspaceEditor(QWidget):
             self._mark_schedule_touched()
             self._refresh_reminder_details()
             self._refresh_status()
+
+    def _set_quick_reminder_offset(self, minutes: int) -> None:
+        self.time_enabled.setChecked(True)
+        self.important_reminder_check.setChecked(True)
+        self.important_schedule._set_mode("follow")
+        self.important_schedule._set_offset(minutes)
+        self._refresh_reminder_details()
+
+    def _set_quick_custom_reminder(self, index: int) -> None:
+        minutes = self.quick_reminder_custom.itemData(index)
+        if minutes:
+            self._set_quick_reminder_offset(int(minutes))
+
+    def _refresh_quick_reminder_controls(self, *_unused) -> None:
+        if not hasattr(self, "quick_reminder_buttons"):
+            return
+        values = self.important_schedule.values()
+        offset = (
+            values["important_reminder_offset_minutes"]
+            if self.important_reminder_check.isChecked() and values["important_reminder_mode"] == "follow"
+            else None
+        )
+        for minutes, button in self.quick_reminder_buttons.items():
+            button.setChecked(offset == minutes)
+        self.quick_reminder_custom.blockSignals(True)
+        index = self.quick_reminder_custom.findData(offset) if offset not in self.quick_reminder_buttons and offset else 0
+        self.quick_reminder_custom.setCurrentIndex(index)
+        self.quick_reminder_custom.blockSignals(False)
 
     def _choose_reminder(self, value: str, *, touched: bool = True) -> None:
         self._reminder_choice = value
@@ -476,7 +536,7 @@ class WorkspaceEditor(QWidget):
         self.important_reminder_check.setVisible(True)
         self.switch_to_reminder_button.setVisible(not reminder_event)
         self.reminder_summary.setText(
-            "提醒时间独立于事项日期和事项时间；取消提醒不会完成事项。"
+            "软件会在右下角置顶提醒；关闭提醒不会完成事项，需手动关闭。"
         )
         self.reminder_event_quick.setVisible(False)
         self.import_steps_rail.setVisible(True)

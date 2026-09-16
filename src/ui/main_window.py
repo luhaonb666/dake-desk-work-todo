@@ -32,7 +32,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.6.7"
+APP_VERSION = "4.6.8"
 
 
 def app_icon() -> QIcon:
