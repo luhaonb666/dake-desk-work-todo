@@ -10,7 +10,7 @@ from typing import Any, Iterable
 
 
 class Database:
-    SCHEMA_VERSION = 10
+    SCHEMA_VERSION = 11
 
     def __init__(self, path: Path) -> None:
         self.connection = sqlite3.connect(path)
@@ -163,6 +163,16 @@ class Database:
                 if column not in columns:
                     self.connection.execute(f"ALTER TABLE tasks ADD COLUMN {column} {definition}")
             version = 10
+        if version < 11:
+            columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(tasks)")}
+            if "event_type" not in columns:
+                # Existing records remain ordinary to-dos. Switching the type
+                # only changes presentation and reminder defaults; it never
+                # removes notes or already-entered execution steps.
+                self.connection.execute(
+                    "ALTER TABLE tasks ADD COLUMN event_type TEXT NOT NULL DEFAULT 'todo'"
+                )
+            version = 11
         self.connection.execute(
             "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)",
             (str(version),),
@@ -200,6 +210,7 @@ class Database:
         recurrence_unit: str = "none",
         recurrence_interval: int = 1,
         content_mode: str = "notes",
+        event_type: str = "todo",
     ) -> int:
         now = datetime.now().isoformat(timespec="seconds")
         cursor = self.connection.execute(
@@ -207,14 +218,14 @@ class Database:
                    title, notes, task_date, due_time, is_fixed, windows_reminder_enabled,
                    important_reminder_offset_minutes, important_reminder_at,
                    recurrence_unit, recurrence_interval,
-                   content_mode, created_at, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   content_mode, event_type, created_at, updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 title, notes, task_date, due_time, int(is_fixed), int(windows_reminder_enabled),
                 max(0, int(important_reminder_offset_minutes)),
                 self._normalize_reminder_at(important_reminder_at),
                 self._normalize_recurrence_unit(recurrence_unit), max(1, int(recurrence_interval)),
-                "steps" if content_mode == "steps" else "notes", now, now,
+                "steps" if content_mode == "steps" else "notes", self._normalize_event_type(event_type), now, now,
             ),
         )
         self.connection.commit()
@@ -225,11 +236,13 @@ class Database:
             "title", "notes", "task_date", "due_time", "is_fixed", "float_slot", "windows_reminder_enabled",
             "important_reminder_offset_minutes", "important_reminder_at",
             "recurrence_unit", "recurrence_interval",
-            "content_mode",
+            "content_mode", "event_type",
         }
         values = {key: value for key, value in fields.items() if key in allowed}
         if "content_mode" in values:
             values["content_mode"] = "steps" if values["content_mode"] == "steps" else "notes"
+        if "event_type" in values:
+            values["event_type"] = self._normalize_event_type(values["event_type"])
         if "important_reminder_offset_minutes" in values:
             values["important_reminder_offset_minutes"] = max(0, int(values["important_reminder_offset_minutes"]))
         if "important_reminder_at" in values:
@@ -295,6 +308,10 @@ class Database:
         return value if value in {"none", "day", "workday", "week", "month", "year"} else "none"
 
     @staticmethod
+    def _normalize_event_type(value: str) -> str:
+        return "reminder" if value == "reminder" else "todo"
+
+    @staticmethod
     def next_recurrence_date(task_date: str, unit: str, interval: int, today: date | None = None) -> str | None:
         """Return the next usable occurrence date, keeping late completion practical."""
         try:
@@ -356,6 +373,7 @@ class Database:
             important_reminder_at=reminder_at,
             recurrence_unit=task["recurrence_unit"], recurrence_interval=int(task["recurrence_interval"] or 1),
             content_mode=task["content_mode"] if "content_mode" in task.keys() else "notes",
+            event_type=task["event_type"] if "event_type" in task.keys() else "todo",
         )
 
     def delete_task(self, task_id: int) -> None:

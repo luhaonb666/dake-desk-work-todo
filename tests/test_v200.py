@@ -1,4 +1,4 @@
-"""Focused V4.6.3 regression checks for settings, reminders, and task views."""
+"""Focused V4.6.4 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -494,7 +494,7 @@ class V200Tests(unittest.TestCase):
         self.assertEqual(dialog.notes_edit.toPlainText(), task["notes"])
         self.assertEqual(dialog.values()["notes"], task["notes"])
 
-    def test_important_reminder_offers_task_time_and_from_now_modes(self) -> None:
+    def test_important_reminder_has_simple_offsets_and_reminder_event_mode(self) -> None:
         dialog = TaskDialog()
         self.assertFalse(dialog.important_reminder_check.isHidden())
         self.assertTrue(dialog.important_reminder_check.isEnabled())
@@ -502,17 +502,33 @@ class V200Tests(unittest.TestCase):
         dialog.time_enabled.setChecked(True)
         self.assertTrue(dialog.important_reminder_check.isEnabled())
         dialog.important_reminder_check.setChecked(True)
-        dialog._choose_reminder_basis("task_time")
         dialog._choose_reminder("offset:30")
         self.assertTrue(dialog.values()["windows_reminder_enabled"])
         self.assertEqual(dialog.values()["important_reminder_offset_minutes"], 30)
         self.assertIsNone(dialog.values()["important_reminder_at"])
         dialog._choose_reminder("custom")
-        dialog.reminder_duration.set_minutes_value(2 * 1440 + 3 * 60 + 30)
-        self.assertEqual(dialog.values()["important_reminder_offset_minutes"], 2 * 1440 + 3 * 60 + 30)
+        dialog.custom_offset_combo.setCurrentIndex(dialog.custom_offset_combo.findData(180))
+        self.assertEqual(dialog.values()["important_reminder_offset_minutes"], 180)
         dialog.time_enabled.setChecked(False)
+        self.assertFalse(dialog.values()["windows_reminder_enabled"])
+        dialog._set_event_type("reminder")
+        self.assertEqual(dialog.values()["event_type"], "reminder")
         self.assertTrue(dialog.values()["windows_reminder_enabled"])
-        self.assertIsNotNone(dialog.values()["important_reminder_at"])
+        self.assertFalse(dialog.add_step_button.isVisible())
+        dialog._set_event_type("todo")
+        self.assertEqual(dialog.values()["event_type"], "todo")
+
+    def test_reminder_event_hides_but_preserves_existing_steps(self) -> None:
+        task_id = self.db.add_task("会议准备", "带齐材料", "2026-09-01", "10:00", False)
+        self.db.replace_task_steps(task_id, [{"content": "打印资料", "is_completed": False}])
+        dialog = TaskDialog(self.db.task_by_id(task_id), task_steps=self.db.task_steps(task_id))
+        dialog._set_event_type("reminder")
+        values = dialog.values()
+        self.assertEqual(values["event_type"], "reminder")
+        self.assertEqual(values["steps"], [{"content": "打印资料", "is_completed": False}])
+        self.db.update_task(task_id, event_type=values["event_type"])
+        self.assertEqual(self.db.task_by_id(task_id)["event_type"], "reminder")
+        self.assertEqual(self.db.task_steps(task_id)[0]["content"], "打印资料")
 
     def test_system_reminder_plan_excludes_past_and_non_opted_in_items(self) -> None:
         enabled = self.db.add_task("重要会议", "", "2026-09-01", "10:00", False, True)

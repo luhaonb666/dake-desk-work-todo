@@ -320,6 +320,9 @@ class TaskStepsEditor(QWidget):
         active = bool(self._rows())
         self.start_button.setVisible(not active and not self._external_start_button)
         self.panel.setVisible(active)
+        # Hosts that place the start action beside "具体内容" need this editor
+        # to consume literally no row height until a real step exists.
+        self.setVisible(active or not self._external_start_button)
         self.updateGeometry()
 
     def _refresh_guide(self) -> None:

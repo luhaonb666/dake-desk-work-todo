@@ -32,7 +32,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.6.3"
+APP_VERSION = "4.6.4"
 
 
 def app_icon() -> QIcon:
@@ -271,7 +271,9 @@ class TaskCard(QFrame):
         )
         content.addWidget(title)
         completed_steps, total_steps = step_summary
-        if total_steps:
+        event_type = task["event_type"] if "event_type" in task.keys() else "todo"
+        show_steps = total_steps and event_type != "reminder"
+        if show_steps:
             steps_preview = ExpandableStepsPreview(task_steps)
             if workspace_mode:
                 steps_preview.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -282,7 +284,7 @@ class TaskCard(QFrame):
                 # Once a task has steps, the steps are the visible working
                 # path. Keep the preserved body as only a one-and-a-half-line
                 # preview below it instead of repeating it above the steps.
-                max_visible_lines=(1 if total_steps else (8 if workspace_mode else ExpandableNotesWidget.MAX_VISIBLE_LINES)),
+                max_visible_lines=(1 if show_steps else (8 if workspace_mode else ExpandableNotesWidget.MAX_VISIBLE_LINES)),
                 expandable=not workspace_mode,
                 collapsed_hint="更多内容请在右侧查看" if workspace_mode else "↓ 点击展开完整说明",
             )
@@ -590,6 +592,7 @@ class MainWindow(QMainWindow):
         self.workspace_selected_task_id: int | None = None
         self._workspace_list_signature = None
         self._workspace_cards: dict[int, TaskCard] = {}
+        self._workspace_exit_in_progress = False
         self._tomorrow_preview_expanded = False
         self.page_stack = QStackedWidget()
         self.setCentralWidget(self.page_stack)
@@ -617,14 +620,10 @@ class MainWindow(QMainWindow):
             "font-size:13px; font-weight:500; padding:6px 10px;"
         )
         header.addWidget(title)
-        greeting_column = QVBoxLayout()
-        greeting_column.setSpacing(3)
-        greeting_column.addWidget(self.header_greeting)
+        header.addStretch(1)
         self.precise_overtime = QLabel()
         self.precise_overtime.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.precise_overtime.setStyleSheet("font-size:12px; color:#876b43; font-weight:500;")
-        greeting_column.addWidget(self.precise_overtime)
-        header.addLayout(greeting_column, 1)
         self.float_button = QPushButton("关闭桌面浮窗")
         self.float_button.clicked.connect(self.toggle_float)
         header.addWidget(self.float_button)
@@ -643,6 +642,8 @@ class MainWindow(QMainWindow):
         self.subtitle.setStyleSheet("font-size:13px; color:#7a8491;")
         details.addWidget(self.subtitle)
         details.addStretch()
+        details.addWidget(self.header_greeting)
+        details.addWidget(self.precise_overtime)
         header_outer.addLayout(details)
         outer.addWidget(header_panel)
 
@@ -942,20 +943,13 @@ class MainWindow(QMainWindow):
         return self.width() >= 1180 and self.height() >= 700
 
     def _update_workspace_mode(self) -> None:
-        if not hasattr(self, "page_stack"):
+        if not hasattr(self, "page_stack") or self._workspace_exit_in_progress:
             return
         wanted = self._workspace_should_be_active()
         if wanted == self._workspace_active:
             return
         if not wanted and self.workspace_editor.is_dirty():
-            answer = QMessageBox.question(
-                self,
-                "未保存修改",
-                "右侧还有未保存的修改。退出全屏编辑将放弃这些修改，是否继续？",
-                QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Cancel,
-            )
-            if answer != QMessageBox.StandardButton.Discard:
+            if not self._confirm_discard_workspace("右侧还有未保存的修改。退出全屏编辑将放弃这些修改。"):
                 # Keep the wide mode until the user deliberately saves or restores.
                 if not self.isFullScreen():
                     QTimer.singleShot(0, self.showFullScreen)
@@ -1164,6 +1158,7 @@ class MainWindow(QMainWindow):
             recurrence_unit=task["recurrence_unit"] if "recurrence_unit" in task.keys() else "none",
             recurrence_interval=int(task["recurrence_interval"] or 1) if "recurrence_interval" in task.keys() else 1,
             content_mode=task["content_mode"] if "content_mode" in task.keys() else "notes",
+            event_type=task["event_type"] if "event_type" in task.keys() else "todo",
         )
         self.db.replace_task_steps(copied_id, [
             {"content": step["content"], "is_completed": False}
@@ -1735,24 +1730,35 @@ class MainWindow(QMainWindow):
 
     def exit_workspace(self) -> None:
         """Leave the workspace cleanly whether it came from full screen or width."""
-        if self.isFullScreen():
-            self.toggle_fullscreen()
-            return
         if self.workspace_editor.is_dirty():
-            answer = QMessageBox.question(
-                self,
-                "未保存修改",
-                "右侧还有未保存的修改。收起编辑工作区将放弃这些修改，是否继续？",
-                QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Cancel,
-            )
-            if answer != QMessageBox.StandardButton.Discard:
+            if not self._confirm_discard_workspace("右侧还有未保存的修改。退出编辑将放弃这些修改。"):
                 return
             self.workspace_editor.restore_baseline()
+        # Mark the intent before changing window state. Qt emits both resize
+        # and state-change events while leaving full screen; neither may open a
+        # second prompt or reactivate the three-column page.
+        self._workspace_exit_in_progress = True
         self._workspace_manual_opt_out = True
         self._workspace_active = False
         self.page_stack.setCurrentWidget(self.standard_page)
+        if self.isFullScreen():
+            self.showNormal()
         self.render()
+        QTimer.singleShot(0, self._finish_workspace_exit)
+
+    def _confirm_discard_workspace(self, text: str) -> bool:
+        prompt = QMessageBox(self)
+        prompt.setIcon(QMessageBox.Icon.Warning)
+        prompt.setWindowTitle("未保存修改")
+        prompt.setText(text)
+        discard = prompt.addButton("放弃修改并退出", QMessageBox.ButtonRole.DestructiveRole)
+        prompt.addButton("继续编辑", QMessageBox.ButtonRole.RejectRole)
+        prompt.exec()
+        return prompt.clickedButton() is discard
+
+    def _finish_workspace_exit(self) -> None:
+        self._workspace_exit_in_progress = False
+        self._update_workspace_mode()
 
     def show_notice(self, text: str) -> None:
         self.notice.setText(text)

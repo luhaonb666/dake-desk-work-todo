@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-
 from PyQt6.QtCore import QDate, QTime, Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
@@ -19,7 +17,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ui.controls import CompactDatePicker, DurationPicker, NoWheelComboBox, TIME_HOURS, TIME_MINUTES, normalize_note_text
+from ui.controls import CompactDatePicker, NoWheelComboBox, TIME_HOURS, TIME_MINUTES, normalize_note_text
 from ui.task_dialog import PlainNotesEditor, TitleEditor
 from ui.task_steps import CompactStepStartButton, TaskStepsEditor
 
@@ -40,6 +38,9 @@ class WorkspaceEditor(QWidget):
         self._reminder_basis = "task_time"
         self._reminder_choice = "offset:0"
         self._from_now_target: str | None = None
+        self._legacy_reminder_at: str | None = None
+        self._schedule_touched = False
+        self._event_type = "todo"
 
         self._outer_layout = QVBoxLayout(self)
         self._outer_layout.setContentsMargins(16, 16, 16, 16)
@@ -55,12 +56,31 @@ class WorkspaceEditor(QWidget):
         self.form_host = QWidget()
         form = QVBoxLayout(self.form_host)
         form.setContentsMargins(0, 0, 0, 0)
-        form.setSpacing(8)
+        form.setSpacing(4)
 
         self.title_edit = TitleEditor()
         self.title_edit.setFixedHeight(76)
         self.title_edit.setPlaceholderText("事项标题（最多两行）")
         self.title_edit.setToolTip("事项标题最多两行；Enter 转到具体内容；Shift + Enter 可换行。")
+        self.event_type_box = QWidget()
+        type_layout = QHBoxLayout(self.event_type_box)
+        type_layout.setContentsMargins(0, 0, 0, 0)
+        type_layout.setSpacing(5)
+        type_layout.addWidget(QLabel("事项类型"))
+        self.event_type_group = QButtonGroup(self)
+        self.event_type_buttons: dict[str, QPushButton] = {}
+        for key, label in (("todo", "待办事项"), ("reminder", "提醒事件")):
+            button = QPushButton(label)
+            button.setCheckable(True)
+            button.setStyleSheet(
+                "QPushButton { border:1px solid #b8cbe7; border-radius:7px; color:#476b9e; background:#fff; padding:5px 9px; font-size:11px; }"
+                "QPushButton:checked { color:#fff; background:#5d82bb; border-color:#5d82bb; }"
+            )
+            self.event_type_group.addButton(button)
+            self.event_type_buttons[key] = button
+            button.clicked.connect(lambda _checked=False, value=key: self._set_event_type(value))
+            type_layout.addWidget(button)
+        type_layout.addStretch()
 
         self.notes_edit = PlainNotesEditor()
         self.notes_edit.setPlaceholderText("具体事项、材料或下一步")
@@ -162,7 +182,8 @@ class WorkspaceEditor(QWidget):
         details_layout = QVBoxLayout(self.reminder_details)
         details_layout.setContentsMargins(23, 2, 0, 1)
         details_layout.setSpacing(4)
-        basis_row = QHBoxLayout()
+        self.reminder_basis_host = QWidget()
+        basis_row = QHBoxLayout(self.reminder_basis_host)
         basis_row.setContentsMargins(0, 0, 0, 0)
         basis_row.addWidget(QLabel("提醒基准"))
         self.reminder_basis_group = QButtonGroup(self)
@@ -179,7 +200,7 @@ class WorkspaceEditor(QWidget):
             button.clicked.connect(lambda _checked=False, value=key: self._choose_reminder_basis(value))
             basis_row.addWidget(button)
         basis_row.addStretch()
-        details_layout.addLayout(basis_row)
+        details_layout.addWidget(self.reminder_basis_host)
         self.task_time_choices = QWidget()
         choice_row = QHBoxLayout(self.task_time_choices)
         choice_row.setContentsMargins(0, 0, 0, 0)
@@ -203,22 +224,36 @@ class WorkspaceEditor(QWidget):
         custom_row = QHBoxLayout(self.custom_reminder_row)
         custom_row.setContentsMargins(0, 0, 0, 0)
         custom_row.setSpacing(5)
-        self.reminder_duration_label = QLabel("提前")
-        custom_row.addWidget(self.reminder_duration_label)
-        self.reminder_duration = DurationPicker()
-        self.reminder_duration.valueChanged.connect(self._update_from_now_target)
-        custom_row.addWidget(self.reminder_duration)
+        custom_row.addWidget(QLabel("自定义提前"))
+        self.custom_offset_combo = NoWheelComboBox()
+        for label, minutes in (("1 小时", 60), ("2 小时", 120), ("3 小时", 180), ("4 小时", 240)):
+            self.custom_offset_combo.addItem(label, minutes)
+        self.custom_offset_combo.currentIndexChanged.connect(self._mark_schedule_touched)
+        custom_row.addWidget(self.custom_offset_combo)
         custom_row.addStretch()
         details_layout.addWidget(self.custom_reminder_row)
         reminder_layout.addWidget(self.reminder_details)
         self.time_enabled.toggled.connect(self._sync_windows_reminder_availability)
         self.important_reminder_check.toggled.connect(self._sync_windows_reminder_availability)
         self.important_reminder_check.toggled.connect(self._refresh_reminder_details)
-        self._choose_reminder(self._reminder_choice)
+        self._choose_reminder(self._reminder_choice, touched=False)
         self._choose_reminder_basis(self._reminder_basis)
         self.fixed_check = QCheckBox("固定锁住待办（显示在当天列表最底部）")
 
+        self.reminder_event_quick = QWidget()
+        quick_row = QHBoxLayout(self.reminder_event_quick)
+        quick_row.setContentsMargins(0, 0, 0, 0)
+        quick_row.setSpacing(5)
+        quick_row.addWidget(QLabel("提醒我"))
+        for label, key in (("今天稍后", "later_today"), ("明天 09:00", "tomorrow"), ("下周一 09:00", "next_monday"), ("选择日期和时间", "pick")):
+            button = QPushButton(label)
+            button.setObjectName("quietButton")
+            button.clicked.connect(lambda _checked=False, value=key: self._apply_reminder_quick(value))
+            quick_row.addWidget(button)
+        quick_row.addStretch()
+
         form.addWidget(self.title_edit)
+        form.addWidget(self.event_type_box)
         form.addWidget(self.steps_editor)
         form.addWidget(self.notes_section)
         settings_label = QLabel("时间与提醒")
@@ -226,6 +261,7 @@ class WorkspaceEditor(QWidget):
         form.addWidget(settings_label)
         form.addWidget(self.date_edit)
         form.addLayout(time_row)
+        form.addWidget(self.reminder_event_quick)
         form.addWidget(self.fixed_check)
         divider = QFrame()
         divider.setFrameShape(QFrame.Shape.HLine)
@@ -333,45 +369,80 @@ class WorkspaceEditor(QWidget):
         self.recurrence_unit_combo.currentIndexChanged.connect(self._refresh_status)
         self.fixed_check.toggled.connect(self._refresh_status)
         self._refresh_recurrence_details()
+        self._refresh_event_type()
         self.clear()
 
     def _sync_windows_reminder_availability(self, enabled: bool) -> None:
         self.reminder_basis_buttons["task_time"].setEnabled(enabled)
-        if not enabled and self._reminder_basis == "task_time":
-            self._choose_reminder_basis("from_now")
         self._refresh_reminder_details()
 
     def _refresh_reminder_details(self, *_unused) -> None:
-        active = self.important_reminder_check.isChecked()
-        task_time = self._reminder_basis == "task_time"
+        active = self._event_type == "reminder" or self.important_reminder_check.isChecked()
         self.reminder_details.setVisible(active)
-        self.task_time_choices.setVisible(active and task_time)
-        self.reminder_duration_label.setText("提前" if task_time else "从现在起")
-        self.custom_reminder_row.setVisible(active and (not task_time or self._reminder_choice == "custom"))
+        self.reminder_basis_host.setVisible(False)
+        self.task_time_choices.setVisible(active)
+        self.custom_reminder_row.setVisible(active and self._reminder_choice == "custom")
 
-    def _choose_reminder(self, value: str) -> None:
+    def _choose_reminder(self, value: str, *, touched: bool = True) -> None:
         self._reminder_choice = value
         self.reminder_choice_buttons[value].setChecked(True)
+        if touched:
+            self._mark_schedule_touched()
         self._refresh_reminder_details()
 
     def _choose_reminder_basis(self, value: str) -> None:
         self._reminder_basis = value
         self.reminder_basis_buttons[value].setChecked(True)
-        if value == "from_now" and not self._loading:
-            self._update_from_now_target()
         self._refresh_reminder_details()
 
-    def _update_from_now_target(self) -> None:
-        """Freeze the absolute target when the user chooses a relative delay.
+    def _mark_schedule_touched(self, *_unused) -> None:
+        self._schedule_touched = True
+        self._legacy_reminder_at = None
+        if not self._loading:
+            self._refresh_status()
 
-        The right editor calls values() frequently to decide whether Save is
-        needed. Recomputing ``now + delay`` there would make an untouched form
-        permanently dirty, so the target is set only when this picker changes.
-        """
-        if self._loading or self._reminder_basis != "from_now":
+    def _set_event_type(self, value: str) -> None:
+        self._event_type = value
+        self._mark_schedule_touched()
+        if value == "reminder":
+            self.time_enabled.setChecked(True)
+            self.important_reminder_check.setChecked(True)
+        self._refresh_event_type()
+
+    def _refresh_event_type(self) -> None:
+        reminder_event = self._event_type == "reminder"
+        self.event_type_buttons[self._event_type].setChecked(True)
+        self.steps_editor.setVisible(not reminder_event and self.steps_editor.row_count() > 0)
+        self.add_step_button.setVisible(not reminder_event)
+        self.important_reminder_check.setVisible(not reminder_event)
+        self.reminder_summary.setText(
+            "提醒事件会在设定时间于右下角置顶提醒。"
+            if reminder_event else "软件会在右下角置顶提醒；关闭提醒不会完成事项。"
+        )
+        self.reminder_event_quick.setVisible(reminder_event)
+        self.import_steps_rail.setVisible(not reminder_event)
+        self._refresh_reminder_details()
+        self._update_editor_layout()
+
+    def _apply_reminder_quick(self, value: str) -> None:
+        now = QTime.currentTime()
+        if value == "later_today":
+            hour = min(22, max(7, now.hour() + 1))
+            self.date_edit.setDate(QDate.currentDate())
+        elif value == "tomorrow":
+            hour = 9
+            self.date_edit.setDate(QDate.currentDate().addDays(1))
+        elif value == "next_monday":
+            days = (8 - QDate.currentDate().dayOfWeek()) % 7 or 7
+            hour = 9
+            self.date_edit.setDate(QDate.currentDate().addDays(days))
+        else:
+            self.date_edit.setFocus()
             return
-        target = datetime.now() + timedelta(minutes=self.reminder_duration.minutes_value())
-        self._from_now_target = target.strftime("%Y-%m-%d %H:%M")
+        self.time_enabled.setChecked(True)
+        self.hour_combo.setCurrentIndex(max(0, self.hour_combo.findData(hour)))
+        self.minute_combo.setCurrentIndex(max(0, self.minute_combo.findData(0)))
+        self._mark_schedule_touched()
         self._refresh_status()
 
     def _refresh_recurrence_details(self, *_unused) -> None:
@@ -459,16 +530,21 @@ class WorkspaceEditor(QWidget):
         self.time_enabled.setChecked(False)
         self.important_reminder_check.setChecked(False)
         self._from_now_target = None
+        self._legacy_reminder_at = None
+        self._schedule_touched = False
+        self._event_type = "todo"
         self._reminder_basis = "task_time"
         self._choose_reminder("offset:0")
         self._choose_reminder_basis("task_time")
-        self.reminder_duration.set_minutes_value(0)
+        self.custom_offset_combo.setCurrentIndex(0)
+        self._schedule_touched = False
         self.recurrence_combo.setCurrentIndex(0)
         self.recurrence_interval_spin.setValue(1)
         self._sync_windows_reminder_availability(False)
         self.fixed_check.setChecked(False)
         self.steps_editor.set_steps([])
         self._loading = False
+        self._refresh_event_type()
         self._update_editor_layout()
         self.form_host.setEnabled(False)
         self.restore_button.setEnabled(False)
@@ -511,21 +587,20 @@ class WorkspaceEditor(QWidget):
         offset = int(task["important_reminder_offset_minutes"]) if "important_reminder_offset_minutes" in task.keys() else 0
         self.important_reminder_check.setChecked(reminder_enabled)
         reminder_at = task["important_reminder_at"] if "important_reminder_at" in task.keys() else None
+        self._legacy_reminder_at = str(reminder_at) if reminder_at else None
+        self._schedule_touched = False
+        self._event_type = task["event_type"] if "event_type" in task.keys() else "todo"
         if reminder_at:
             self._from_now_target = str(reminder_at)
-            try:
-                target = datetime.strptime(self._from_now_target, "%Y-%m-%d %H:%M")
-                self.reminder_duration.set_minutes_value(max(0, int((target - datetime.now()).total_seconds() // 60)))
-            except ValueError:
-                self.reminder_duration.set_minutes_value(0)
-            self._choose_reminder_basis("from_now")
+            self._choose_reminder_basis("task_time")
+            self._choose_reminder("offset:0", touched=False)
         else:
             self._from_now_target = None
             self._choose_reminder_basis("task_time")
             choice = f"offset:{offset}" if f"offset:{offset}" in self.reminder_choice_buttons else "custom"
-            self._choose_reminder(choice)
+            self._choose_reminder(choice, touched=False)
             if choice == "custom":
-                self.reminder_duration.set_minutes_value(offset)
+                self.custom_offset_combo.setCurrentIndex(max(0, self.custom_offset_combo.findData(offset)))
         recurrence_unit = task["recurrence_unit"] if "recurrence_unit" in task.keys() else "none"
         recurrence_interval = int(task["recurrence_interval"] or 1) if "recurrence_interval" in task.keys() else 1
         self.recurrence_combo.setCurrentIndex(max(0, self.recurrence_combo.findData(recurrence_unit)))
@@ -534,6 +609,7 @@ class WorkspaceEditor(QWidget):
         self._sync_windows_reminder_availability(bool(due))
         self.fixed_check.setChecked(bool(task["is_fixed"]))
         self._loading = False
+        self._refresh_event_type()
         self._update_editor_layout()
         self._refresh_import_button()
         self.form_host.setEnabled(True)
@@ -553,8 +629,10 @@ class WorkspaceEditor(QWidget):
         due_time = None
         if self.time_enabled.isChecked():
             due_time = f"{self.hour_combo.currentData():02d}:{self.minute_combo.currentData():02d}"
-        task_time_reminder = self._reminder_basis == "task_time"
-        reminder_enabled = self.important_reminder_check.isChecked() and (bool(due_time) if task_time_reminder else True)
+        reminder_event = self._event_type == "reminder"
+        reminder_enabled = (reminder_event or self.important_reminder_check.isChecked()) and (
+            bool(due_time) or bool(self._legacy_reminder_at and not self._schedule_touched)
+        )
         return {
             "title": self.title_edit.toPlainText().strip(),
             "notes": normalize_note_text(self.notes_edit.toPlainText()).strip(),
@@ -563,15 +641,16 @@ class WorkspaceEditor(QWidget):
             "is_fixed": self.fixed_check.isChecked(),
             "windows_reminder_enabled": reminder_enabled,
             "important_reminder_offset_minutes": (
-                (self.reminder_duration.minutes_value() if self._reminder_choice == "custom"
+                (int(self.custom_offset_combo.currentData()) if self._reminder_choice == "custom"
                  else int(self._reminder_choice.split(":", 1)[1]))
-                if reminder_enabled and task_time_reminder else 0
+                if reminder_enabled and due_time else 0
             ),
-            "important_reminder_at": self._from_now_target if reminder_enabled and not task_time_reminder else None,
+            "important_reminder_at": self._legacy_reminder_at if not self._schedule_touched else None,
             "recurrence_unit": self.recurrence_unit_combo.currentData() if self.recurrence_combo.currentData() == "custom" else self.recurrence_combo.currentData(),
             "recurrence_interval": self.recurrence_interval_spin.value() if self.recurrence_combo.currentData() == "custom" else 1,
             "steps": self.steps_editor.values(),
             "content_mode": "notes",
+            "event_type": self._event_type,
         }
 
     def is_dirty(self) -> bool:
@@ -592,22 +671,21 @@ class WorkspaceEditor(QWidget):
             self.minute_combo.setCurrentIndex(max(0, self.minute_combo.findData(int(minute))))
         self.important_reminder_check.setChecked(values["windows_reminder_enabled"])
         reminder_at = values.get("important_reminder_at")
+        self._legacy_reminder_at = reminder_at
+        self._schedule_touched = False
+        self._event_type = values.get("event_type", "todo")
         if reminder_at:
             self._from_now_target = reminder_at
-            try:
-                target = datetime.strptime(reminder_at, "%Y-%m-%d %H:%M")
-                self.reminder_duration.set_minutes_value(max(0, int((target - datetime.now()).total_seconds() // 60)))
-            except ValueError:
-                self.reminder_duration.set_minutes_value(0)
-            self._choose_reminder_basis("from_now")
+            self._choose_reminder_basis("task_time")
+            self._choose_reminder("offset:0", touched=False)
         else:
             self._from_now_target = None
             self._choose_reminder_basis("task_time")
             offset = values.get("important_reminder_offset_minutes", 0)
             choice = f"offset:{offset}" if f"offset:{offset}" in self.reminder_choice_buttons else "custom"
-            self._choose_reminder(choice)
+            self._choose_reminder(choice, touched=False)
             if choice == "custom":
-                self.reminder_duration.set_minutes_value(offset)
+                self.custom_offset_combo.setCurrentIndex(max(0, self.custom_offset_combo.findData(offset)))
         unit = values.get("recurrence_unit", "none")
         self.recurrence_combo.setCurrentIndex(max(0, self.recurrence_combo.findData(unit)))
         self.recurrence_interval_spin.setValue(values.get("recurrence_interval", 1))
@@ -616,6 +694,7 @@ class WorkspaceEditor(QWidget):
         self.fixed_check.setChecked(values["is_fixed"])
         self.steps_editor.set_steps(values.get("steps", []))
         self._loading = False
+        self._refresh_event_type()
         self._update_editor_layout()
         self._refresh_import_button()
         self._refresh_status()
