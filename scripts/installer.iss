@@ -1,5 +1,5 @@
 #define AppName "大可桌边"
-#define AppVersion "4.6.4"
+#define AppVersion "4.6.5"
 #define AppPublisher "大可"
 #define AppExeName "DaKeDesk.exe"
 #define AppAUMID "DaKe.DaKeDesk"

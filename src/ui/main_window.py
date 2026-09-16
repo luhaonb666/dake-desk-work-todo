@@ -32,7 +32,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.6.4"
+APP_VERSION = "4.6.5"
 
 
 def app_icon() -> QIcon:
@@ -640,10 +640,16 @@ class MainWindow(QMainWindow):
         details = QHBoxLayout()
         self.subtitle = QLabel()
         self.subtitle.setStyleSheet("font-size:13px; color:#7a8491;")
+        self.header_message_group = QWidget()
+        header_message_layout = QHBoxLayout(self.header_message_group)
+        header_message_layout.setContentsMargins(0, 0, 0, 0)
+        header_message_layout.setSpacing(8)
+        header_message_layout.addWidget(self.header_greeting)
+        header_message_layout.addWidget(self.precise_overtime)
         details.addWidget(self.subtitle)
-        details.addStretch()
-        details.addWidget(self.header_greeting)
-        details.addWidget(self.precise_overtime)
+        details.addStretch(1)
+        details.addWidget(self.header_message_group)
+        details.addStretch(1)
         header_outer.addLayout(details)
         outer.addWidget(header_panel)
 
@@ -1165,7 +1171,7 @@ class MainWindow(QMainWindow):
             for step in self.db.task_steps(task_id)
         ])
         self.workspace_selected_task_id = copied_id
-        self.show_notice("已新建为后续事项：原事项保留，新事项可单独继续处理。")
+        self.show_notice("已保留原事项并另建后续：新事项可单独继续处理。")
         self.render()
 
     def move_workspace_task_to_today(self, task_id: int) -> None:

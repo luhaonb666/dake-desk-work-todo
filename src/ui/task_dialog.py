@@ -225,8 +225,9 @@ class TaskDialog(QDialog):
         choice_row.setContentsMargins(0, 0, 0, 0)
         choice_row.setSpacing(5)
         self.reminder_choice_group = QButtonGroup(self)
+        self.reminder_choice_group.setExclusive(False)
         self.reminder_choice_buttons: dict[str, QPushButton] = {}
-        for key, label in (("offset:0", "准点"), ("offset:10", "提前 10 分"), ("offset:30", "提前半小时"), ("custom", "自定义")):
+        for key, label in (("offset:0", "准点"), ("offset:10", "提前 10 分"), ("offset:30", "提前半小时")):
             button = QPushButton(label)
             button.setCheckable(True)
             button.setStyleSheet(
@@ -237,22 +238,27 @@ class TaskDialog(QDialog):
             self.reminder_choice_buttons[key] = button
             button.clicked.connect(lambda _checked=False, value=key: self._choose_reminder(value))
             choice_row.addWidget(button)
+        self.custom_offset_combo = NoWheelComboBox()
+        self.custom_offset_combo.setObjectName("reminderOffsetCombo")
+        self.custom_offset_combo.addItem("自定义 ▾", None)
+        for label, minutes in (("提前 1 小时", 60), ("提前 2 小时", 120), ("提前 3 小时", 180), ("提前 4 小时", 240)):
+            self.custom_offset_combo.addItem(label, minutes)
+        self.custom_offset_combo.setStyleSheet(
+            "QComboBox#reminderOffsetCombo { border:1px solid #b8cbe7; border-radius:7px; color:#476b9e; background:#fff; padding:5px 8px; font-size:11px; }"
+            "QComboBox#reminderOffsetCombo:hover { background:#f3f7ff; border-color:#7597d1; }"
+        )
+        self.custom_offset_combo.currentIndexChanged.connect(self._choose_custom_offset)
+        if self._reminder_choice == "custom":
+            self.custom_offset_combo.setCurrentIndex(max(1, self.custom_offset_combo.findData(reminder_offset)))
+        choice_row.addWidget(self.custom_offset_combo)
         choice_row.addStretch()
         details_layout.addWidget(self.task_time_choices)
-        self.custom_reminder_row = QWidget()
-        custom_row = QHBoxLayout(self.custom_reminder_row)
-        custom_row.setContentsMargins(0, 0, 0, 0)
-        custom_row.setSpacing(5)
-        custom_row.addWidget(QLabel("自定义提前"))
-        self.custom_offset_combo = NoWheelComboBox()
-        for label, minutes in (("1 小时", 60), ("2 小时", 120), ("3 小时", 180), ("4 小时", 240)):
-            self.custom_offset_combo.addItem(label, minutes)
-        self.custom_offset_combo.setCurrentIndex(max(0, self.custom_offset_combo.findData(reminder_offset)))
-        self.custom_offset_combo.currentIndexChanged.connect(self._mark_schedule_touched)
-        custom_row.addWidget(self.custom_offset_combo)
-        custom_row.addStretch()
-        details_layout.addWidget(self.custom_reminder_row)
         reminder_layout.addWidget(self.reminder_details)
+        self.switch_to_reminder_button = QPushButton("设为提醒事件")
+        self.switch_to_reminder_button.setObjectName("quietButton")
+        self.switch_to_reminder_button.setToolTip("提醒事件可设置快捷提醒时间与重复规则；已有内容和分项步骤会保留。")
+        self.switch_to_reminder_button.clicked.connect(lambda: self._set_event_type("reminder"))
+        reminder_layout.addWidget(self.switch_to_reminder_button, 0, Qt.AlignmentFlag.AlignLeft)
         self.recurrence_box = QFrame()
         self.recurrence_box.setObjectName("recurrenceBox")
         self.recurrence_box.setStyleSheet(
@@ -380,9 +386,9 @@ class TaskDialog(QDialog):
         buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存")
         buttons.button(QDialogButtonBox.StandardButton.Save).setObjectName("primaryButton")
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
-        self.follow_up_button = QPushButton("新建为后续事项")
+        self.follow_up_button = QPushButton("保留原事项，另建后续")
         self.follow_up_button.setObjectName("quietButton")
-        self.follow_up_button.setToolTip("保留当前事项，并按当前内容新建一条可继续处理的后续事项。")
+        self.follow_up_button.setToolTip("保留原事项，新建一条后续事项；分项步骤会从未完成开始。")
         self.follow_up_button.setVisible(bool(task))
         self.follow_up_button.clicked.connect(self._accept_as_follow_up)
         buttons.addButton(self.follow_up_button, QDialogButtonBox.ButtonRole.ActionRole)
@@ -429,7 +435,7 @@ class TaskDialog(QDialog):
             "is_fixed": self.fixed_check.isChecked(),
             "windows_reminder_enabled": reminder_enabled,
             "important_reminder_offset_minutes": (
-                (int(self.custom_offset_combo.currentData()) if self._reminder_choice == "custom"
+                (int(self.custom_offset_combo.currentData() or 60) if self._reminder_choice == "custom"
                  else int(self._reminder_choice.split(":", 1)[1]))
                 if reminder_enabled and due_time else 0
             ),
@@ -453,12 +459,15 @@ class TaskDialog(QDialog):
         self.reminder_details.setVisible(active)
         self.reminder_basis_host.setVisible(False)
         self.task_time_choices.setVisible(active)
-        self.custom_reminder_row.setVisible(active and self._reminder_choice == "custom")
 
     def _choose_reminder(self, value: str, *, touched: bool = True) -> None:
         self._reminder_choice = value
-        button = self.reminder_choice_buttons[value]
-        button.setChecked(True)
+        for key, button in self.reminder_choice_buttons.items():
+            button.setChecked(key == value)
+        if value != "custom":
+            self.custom_offset_combo.blockSignals(True)
+            self.custom_offset_combo.setCurrentIndex(0)
+            self.custom_offset_combo.blockSignals(False)
         if touched:
             self._mark_schedule_touched()
         self._refresh_reminder_details()
@@ -471,6 +480,15 @@ class TaskDialog(QDialog):
         self._schedule_touched = True
         self._legacy_reminder_at = None
 
+    def _choose_custom_offset(self, index: int) -> None:
+        if index <= 0:
+            return
+        self._reminder_choice = "custom"
+        for button in self.reminder_choice_buttons.values():
+            button.setChecked(False)
+        self._mark_schedule_touched()
+        self._refresh_reminder_details()
+
     def _set_event_type(self, value: str) -> None:
         self._event_type = value
         self._mark_schedule_touched()
@@ -482,6 +500,7 @@ class TaskDialog(QDialog):
     def _refresh_event_type(self) -> None:
         reminder_event = self._event_type == "reminder"
         self.event_type_buttons[self._event_type].setChecked(True)
+        self.event_type_box.setVisible(reminder_event)
         self.steps_editor.setVisible(not reminder_event and self.steps_editor.row_count() > 0)
         self.add_step_button.setVisible(not reminder_event)
         self.important_reminder_check.setVisible(not reminder_event)
@@ -492,6 +511,8 @@ class TaskDialog(QDialog):
         self.reminder_summary.setVisible(True)
         self.reminder_event_quick.setVisible(reminder_event)
         self.import_steps_rail.setVisible(not reminder_event)
+        self.switch_to_reminder_button.setVisible(not reminder_event)
+        self.recurrence_box.setVisible(reminder_event)
         self._refresh_reminder_details()
         self._refresh_step_layout()
 
@@ -528,8 +549,8 @@ class TaskDialog(QDialog):
             return
         answer = QMessageBox.question(
             self,
-            "新建为后续事项",
-            "将保留当前事项，并新建一条相同内容的后续事项。\n新事项可单独继续修改，分项步骤会从未完成开始。",
+            "保留原事项，另建后续",
+            "原事项会保留；将另建一条相同内容的后续事项。\n新事项可单独继续修改，分项步骤会从未完成开始。",
         )
         if answer != QMessageBox.StandardButton.Yes:
             return

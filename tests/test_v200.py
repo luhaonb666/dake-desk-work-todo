@@ -1,4 +1,4 @@
-"""Focused V4.6.4 regression checks for settings, reminders, and task views."""
+"""Focused V4.6.5 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -286,7 +286,7 @@ class V200Tests(unittest.TestCase):
             "due_time": "09:00", "is_fixed": 0,
         })
         self.assertFalse(dialog.follow_up_button.isHidden())
-        self.assertEqual(dialog.follow_up_button.text(), "新建为后续事项")
+        self.assertEqual(dialog.follow_up_button.text(), "保留原事项，另建后续")
         self.assertFalse(dialog.duplicate_requested())
 
     def test_workspace_editor_waits_for_explicit_save(self) -> None:
@@ -498,6 +498,8 @@ class V200Tests(unittest.TestCase):
         dialog = TaskDialog()
         self.assertFalse(dialog.important_reminder_check.isHidden())
         self.assertTrue(dialog.important_reminder_check.isEnabled())
+        self.assertTrue(dialog.event_type_box.isHidden())
+        self.assertTrue(dialog.recurrence_box.isHidden())
         self.assertFalse(dialog.important_reminder_check.isChecked())
         dialog.time_enabled.setChecked(True)
         self.assertTrue(dialog.important_reminder_check.isEnabled())
@@ -515,6 +517,8 @@ class V200Tests(unittest.TestCase):
         self.assertEqual(dialog.values()["event_type"], "reminder")
         self.assertTrue(dialog.values()["windows_reminder_enabled"])
         self.assertFalse(dialog.add_step_button.isVisible())
+        self.assertFalse(dialog.event_type_box.isHidden())
+        self.assertFalse(dialog.recurrence_box.isHidden())
         dialog._set_event_type("todo")
         self.assertEqual(dialog.values()["event_type"], "todo")
 
@@ -672,8 +676,16 @@ class V200Tests(unittest.TestCase):
         self.assertEqual(editor.operations_label.text(), "继续处理方式")
         self.assertEqual(editor.move_today_button.text(), "安排到今天继续处理")
         self.assertIn("不会新建副本", editor.move_today_hint.text())
-        self.assertEqual(editor.duplicate_button.text(), "新建为后续事项")
-        self.assertIn("保留当前记录", editor.duplicate_hint.text())
+        self.assertEqual(editor.duplicate_button.text(), "保留原事项，另建后续")
+        self.assertIn("原事项会保留", editor.duplicate_hint.text())
+
+    def test_v465_current_item_keeps_the_follow_up_explanation(self) -> None:
+        task_id = self.db.add_task("当前项目", "", self.db.today(), None, False)
+        editor = WorkspaceEditor()
+        editor.load_task(self.db.task_by_id(task_id))
+        self.assertFalse(editor.duplicate_hint.isHidden())
+        self.assertIn("分项进度重新开始", editor.duplicate_hint.text())
+        self.assertTrue(editor.move_today_button.isHidden())
 
     def test_v453_step_plus_inserts_directly_below_the_current_step(self) -> None:
         editor = TaskStepsEditor()

@@ -206,8 +206,9 @@ class WorkspaceEditor(QWidget):
         choice_row.setContentsMargins(0, 0, 0, 0)
         choice_row.setSpacing(5)
         self.reminder_choice_group = QButtonGroup(self)
+        self.reminder_choice_group.setExclusive(False)
         self.reminder_choice_buttons: dict[str, QPushButton] = {}
-        for key, label in (("offset:0", "准点"), ("offset:10", "提前 10 分"), ("offset:30", "提前半小时"), ("custom", "自定义")):
+        for key, label in (("offset:0", "准点"), ("offset:10", "提前 10 分"), ("offset:30", "提前半小时")):
             button = QPushButton(label)
             button.setCheckable(True)
             button.setStyleSheet(
@@ -218,21 +219,25 @@ class WorkspaceEditor(QWidget):
             self.reminder_choice_buttons[key] = button
             button.clicked.connect(lambda _checked=False, value=key: self._choose_reminder(value))
             choice_row.addWidget(button)
+        self.custom_offset_combo = NoWheelComboBox()
+        self.custom_offset_combo.setObjectName("reminderOffsetCombo")
+        self.custom_offset_combo.addItem("自定义 ▾", None)
+        for label, minutes in (("提前 1 小时", 60), ("提前 2 小时", 120), ("提前 3 小时", 180), ("提前 4 小时", 240)):
+            self.custom_offset_combo.addItem(label, minutes)
+        self.custom_offset_combo.setStyleSheet(
+            "QComboBox#reminderOffsetCombo { border:1px solid #b8cbe7; border-radius:7px; color:#476b9e; background:#fff; padding:5px 8px; font-size:11px; }"
+            "QComboBox#reminderOffsetCombo:hover { background:#f3f7ff; border-color:#7597d1; }"
+        )
+        self.custom_offset_combo.currentIndexChanged.connect(self._choose_custom_offset)
+        choice_row.addWidget(self.custom_offset_combo)
         choice_row.addStretch()
         details_layout.addWidget(self.task_time_choices)
-        self.custom_reminder_row = QWidget()
-        custom_row = QHBoxLayout(self.custom_reminder_row)
-        custom_row.setContentsMargins(0, 0, 0, 0)
-        custom_row.setSpacing(5)
-        custom_row.addWidget(QLabel("自定义提前"))
-        self.custom_offset_combo = NoWheelComboBox()
-        for label, minutes in (("1 小时", 60), ("2 小时", 120), ("3 小时", 180), ("4 小时", 240)):
-            self.custom_offset_combo.addItem(label, minutes)
-        self.custom_offset_combo.currentIndexChanged.connect(self._mark_schedule_touched)
-        custom_row.addWidget(self.custom_offset_combo)
-        custom_row.addStretch()
-        details_layout.addWidget(self.custom_reminder_row)
         reminder_layout.addWidget(self.reminder_details)
+        self.switch_to_reminder_button = QPushButton("设为提醒事件")
+        self.switch_to_reminder_button.setObjectName("quietButton")
+        self.switch_to_reminder_button.setToolTip("提醒事件可设置快捷提醒时间与重复规则；已有内容和分项步骤会保留。")
+        self.switch_to_reminder_button.clicked.connect(lambda: self._set_event_type("reminder"))
+        reminder_layout.addWidget(self.switch_to_reminder_button, 0, Qt.AlignmentFlag.AlignLeft)
         self.time_enabled.toggled.connect(self._sync_windows_reminder_availability)
         self.important_reminder_check.toggled.connect(self._sync_windows_reminder_availability)
         self.important_reminder_check.toggled.connect(self._refresh_reminder_details)
@@ -307,7 +312,7 @@ class WorkspaceEditor(QWidget):
         self.operations_label = QLabel("事项操作")
         self.operations_label.setStyleSheet("font-size:12px; color:#718096; font-weight:600; padding:0 0 5px;")
         form.addWidget(self.operations_label)
-        self.duplicate_button = QPushButton("新建为后续事项")
+        self.duplicate_button = QPushButton("保留原事项，另建后续")
         self.duplicate_button.setObjectName("continuationAction")
         self.duplicate_button.setFixedHeight(34)
         self.duplicate_button.setStyleSheet(
@@ -316,9 +321,9 @@ class WorkspaceEditor(QWidget):
             "QPushButton#continuationAction:hover { background:#edf4ff; border-color:#759ad1; }"
             "QPushButton#continuationAction:disabled { color:#9aa7b7; background:#f8fafc; border-color:#dce4ee; }"
         )
-        self.duplicate_button.setToolTip("保留当前事项，并新建一条可继续处理的后续事项。")
+        self.duplicate_button.setToolTip("保留原事项，新建一条可继续处理的后续事项。")
         self.duplicate_button.clicked.connect(self._emit_duplicate)
-        self.duplicate_hint = QLabel("保留当前记录，并新建一条今天的后续事项。")
+        self.duplicate_hint = QLabel("原事项会保留；新事项可继续处理，分项进度重新开始。")
         self.duplicate_hint.setWordWrap(True)
         self.duplicate_hint.setStyleSheet("font-size:11px; color:#7f8da0; padding:1px 5px 3px;")
         self.move_today_button = QPushButton("安排到今天继续处理")
@@ -381,13 +386,26 @@ class WorkspaceEditor(QWidget):
         self.reminder_details.setVisible(active)
         self.reminder_basis_host.setVisible(False)
         self.task_time_choices.setVisible(active)
-        self.custom_reminder_row.setVisible(active and self._reminder_choice == "custom")
 
     def _choose_reminder(self, value: str, *, touched: bool = True) -> None:
         self._reminder_choice = value
-        self.reminder_choice_buttons[value].setChecked(True)
+        for key, button in self.reminder_choice_buttons.items():
+            button.setChecked(key == value)
+        if value != "custom":
+            self.custom_offset_combo.blockSignals(True)
+            self.custom_offset_combo.setCurrentIndex(0)
+            self.custom_offset_combo.blockSignals(False)
         if touched:
             self._mark_schedule_touched()
+        self._refresh_reminder_details()
+
+    def _choose_custom_offset(self, index: int) -> None:
+        if index <= 0:
+            return
+        self._reminder_choice = "custom"
+        for button in self.reminder_choice_buttons.values():
+            button.setChecked(False)
+        self._mark_schedule_touched()
         self._refresh_reminder_details()
 
     def _choose_reminder_basis(self, value: str) -> None:
@@ -412,15 +430,18 @@ class WorkspaceEditor(QWidget):
     def _refresh_event_type(self) -> None:
         reminder_event = self._event_type == "reminder"
         self.event_type_buttons[self._event_type].setChecked(True)
+        self.event_type_box.setVisible(reminder_event)
         self.steps_editor.setVisible(not reminder_event and self.steps_editor.row_count() > 0)
         self.add_step_button.setVisible(not reminder_event)
         self.important_reminder_check.setVisible(not reminder_event)
+        self.switch_to_reminder_button.setVisible(not reminder_event)
         self.reminder_summary.setText(
             "提醒事件会在设定时间于右下角置顶提醒。"
             if reminder_event else "软件会在右下角置顶提醒；关闭提醒不会完成事项。"
         )
         self.reminder_event_quick.setVisible(reminder_event)
         self.import_steps_rail.setVisible(not reminder_event)
+        self.recurrence_box.setVisible(reminder_event)
         self._refresh_reminder_details()
         self._update_editor_layout()
 
@@ -470,11 +491,10 @@ class WorkspaceEditor(QWidget):
             self.set_status_message("已保存")
         can_copy = self._task_id is not None and not self.is_dirty()
         self.duplicate_button.setEnabled(can_copy)
-        if self._task_is_previous:
-            self.duplicate_hint.setText(
-                "保留当前记录，并新建一条今天的后续事项。"
-                if can_copy else "请先保存当前修改后，再选择继续处理方式。"
-            )
+        self.duplicate_hint.setText(
+            "原事项会保留；新事项可继续处理，分项进度重新开始。"
+            if can_copy else "请先保存当前修改后，再选择继续处理方式。"
+        )
 
     def _on_notes_changed(self) -> None:
         self._refresh_import_button()
@@ -600,7 +620,7 @@ class WorkspaceEditor(QWidget):
             choice = f"offset:{offset}" if f"offset:{offset}" in self.reminder_choice_buttons else "custom"
             self._choose_reminder(choice, touched=False)
             if choice == "custom":
-                self.custom_offset_combo.setCurrentIndex(max(0, self.custom_offset_combo.findData(offset)))
+                self.custom_offset_combo.setCurrentIndex(max(1, self.custom_offset_combo.findData(offset)))
         recurrence_unit = task["recurrence_unit"] if "recurrence_unit" in task.keys() else "none"
         recurrence_interval = int(task["recurrence_interval"] or 1) if "recurrence_interval" in task.keys() else 1
         self.recurrence_combo.setCurrentIndex(max(0, self.recurrence_combo.findData(recurrence_unit)))
@@ -618,7 +638,7 @@ class WorkspaceEditor(QWidget):
         self.operation_divider.setVisible(True)
         self.operations_label.setVisible(True)
         self.duplicate_button.setVisible(True)
-        self.duplicate_hint.setVisible(self._task_is_previous)
+        self.duplicate_hint.setVisible(True)
         self.move_today_button.setVisible(self._task_is_previous)
         self.move_today_hint.setVisible(self._task_is_previous)
         self.operations_label.setText("继续处理方式" if self._task_is_previous else "事项操作")
@@ -641,7 +661,7 @@ class WorkspaceEditor(QWidget):
             "is_fixed": self.fixed_check.isChecked(),
             "windows_reminder_enabled": reminder_enabled,
             "important_reminder_offset_minutes": (
-                (int(self.custom_offset_combo.currentData()) if self._reminder_choice == "custom"
+                (int(self.custom_offset_combo.currentData() or 60) if self._reminder_choice == "custom"
                  else int(self._reminder_choice.split(":", 1)[1]))
                 if reminder_enabled and due_time else 0
             ),
@@ -685,7 +705,7 @@ class WorkspaceEditor(QWidget):
             choice = f"offset:{offset}" if f"offset:{offset}" in self.reminder_choice_buttons else "custom"
             self._choose_reminder(choice, touched=False)
             if choice == "custom":
-                self.custom_offset_combo.setCurrentIndex(max(0, self.custom_offset_combo.findData(offset)))
+                self.custom_offset_combo.setCurrentIndex(max(1, self.custom_offset_combo.findData(offset)))
         unit = values.get("recurrence_unit", "none")
         self.recurrence_combo.setCurrentIndex(max(0, self.recurrence_combo.findData(unit)))
         self.recurrence_interval_spin.setValue(values.get("recurrence_interval", 1))
