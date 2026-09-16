@@ -1,4 +1,4 @@
-"""Focused V4.6.5 regression checks for settings, reminders, and task views."""
+"""Focused V4.6.6 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -494,7 +494,7 @@ class V200Tests(unittest.TestCase):
         self.assertEqual(dialog.notes_edit.toPlainText(), task["notes"])
         self.assertEqual(dialog.values()["notes"], task["notes"])
 
-    def test_important_reminder_has_simple_offsets_and_reminder_event_mode(self) -> None:
+    def test_important_reminder_has_independent_schedule_modes(self) -> None:
         dialog = TaskDialog()
         self.assertFalse(dialog.important_reminder_check.isHidden())
         self.assertTrue(dialog.important_reminder_check.isEnabled())
@@ -502,25 +502,20 @@ class V200Tests(unittest.TestCase):
         self.assertTrue(dialog.recurrence_box.isHidden())
         self.assertFalse(dialog.important_reminder_check.isChecked())
         dialog.time_enabled.setChecked(True)
-        self.assertTrue(dialog.important_reminder_check.isEnabled())
+        dialog.important_schedule._set_mode("follow")
         dialog.important_reminder_check.setChecked(True)
-        dialog._choose_reminder("offset:30")
+        dialog.important_schedule._set_offset(30)
         self.assertTrue(dialog.values()["windows_reminder_enabled"])
         self.assertEqual(dialog.values()["important_reminder_offset_minutes"], 30)
         self.assertIsNone(dialog.values()["important_reminder_at"])
-        dialog._choose_reminder("custom")
-        dialog.custom_offset_combo.setCurrentIndex(dialog.custom_offset_combo.findData(180))
+        dialog.important_schedule.custom_offset.setCurrentIndex(
+            dialog.important_schedule.custom_offset.findData(180)
+        )
         self.assertEqual(dialog.values()["important_reminder_offset_minutes"], 180)
-        dialog.time_enabled.setChecked(False)
-        self.assertFalse(dialog.values()["windows_reminder_enabled"])
-        dialog._set_event_type("reminder")
-        self.assertEqual(dialog.values()["event_type"], "reminder")
+        dialog.important_schedule._set_mode("deadline")
+        self.assertEqual(dialog.values()["important_reminder_mode"], "deadline")
         self.assertTrue(dialog.values()["windows_reminder_enabled"])
-        self.assertFalse(dialog.add_step_button.isVisible())
-        self.assertFalse(dialog.event_type_box.isHidden())
-        self.assertFalse(dialog.recurrence_box.isHidden())
-        dialog._set_event_type("todo")
-        self.assertEqual(dialog.values()["event_type"], "todo")
+        self.assertFalse(dialog.add_step_button.isHidden())
 
     def test_reminder_event_hides_but_preserves_existing_steps(self) -> None:
         task_id = self.db.add_task("会议准备", "带齐材料", "2026-09-01", "10:00", False)
@@ -533,6 +528,46 @@ class V200Tests(unittest.TestCase):
         self.db.update_task(task_id, event_type=values["event_type"])
         self.assertEqual(self.db.task_by_id(task_id)["event_type"], "reminder")
         self.assertEqual(self.db.task_steps(task_id)[0]["content"], "打印资料")
+
+    def test_v466_deadline_plan_starts_early_and_keeps_reminding_after_target(self) -> None:
+        task_id = self.db.add_task(
+            "9 月底提交材料", "", "2026-09-30", None, False,
+            windows_reminder_enabled=True,
+            important_reminder_mode="deadline",
+            important_reminder_time="12:00",
+            important_reminder_lead_days=7,
+        )
+        self.assertEqual(
+            self.db.pending_important_reminder_tasks(datetime(2026, 9, 22, 12, 0)), []
+        )
+        self.assertEqual(
+            [task["id"] for task in self.db.pending_important_reminder_tasks(datetime(2026, 9, 23, 12, 0))],
+            [task_id],
+        )
+        self.assertEqual(
+            [task["id"] for task in self.db.pending_important_reminder_tasks(datetime(2026, 10, 1, 12, 0))],
+            [task_id],
+        )
+        self.db.cancel_important_reminder(task_id)
+        self.assertEqual(self.db.pending_important_reminder_tasks(datetime(2026, 10, 2, 12, 0)), [])
+
+    def test_v466_weekly_plan_does_not_change_the_task_date_or_time(self) -> None:
+        task_id = self.db.add_task(
+            "交给领导的表格", "", "2026-09-16", None, False,
+            windows_reminder_enabled=True,
+            important_reminder_mode="weekly",
+            important_reminder_start_date="2026-09-16",
+            important_reminder_time="12:00",
+            important_reminder_weekday=3,
+        )
+        task = self.db.task_by_id(task_id)
+        self.assertEqual(task["task_date"], "2026-09-16")
+        self.assertIsNone(task["due_time"])
+        self.assertEqual(
+            [item["id"] for item in self.db.pending_important_reminder_tasks(datetime(2026, 9, 16, 12, 0))],
+            [task_id],
+        )
+        self.assertEqual(self.db.pending_important_reminder_tasks(datetime(2026, 9, 17, 12, 0)), [])
 
     def test_system_reminder_plan_excludes_past_and_non_opted_in_items(self) -> None:
         enabled = self.db.add_task("重要会议", "", "2026-09-01", "10:00", False, True)

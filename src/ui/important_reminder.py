@@ -127,14 +127,25 @@ class ImportantReminderWindow(QWidget):
             self.hide()
             return
         task = self._tasks[self._current_id]
-        offset = int(task["important_reminder_offset_minutes"]) if "important_reminder_offset_minutes" in task.keys() else 0
-        custom_at = task["important_reminder_at"] if "important_reminder_at" in task.keys() else None
-        if custom_at:
-            self.time_label.setText(f"{custom_at} · 自定义提醒")
-        else:
+        schedule_mode = task["important_reminder_mode"] if "important_reminder_mode" in task.keys() else "follow"
+        if schedule_mode == "deadline":
+            lead = int(task["important_reminder_lead_days"] or 0)
             self.time_label.setText(
-                f"{task['due_time']} · 提前 {offset} 分钟提醒" if offset else f"{task['due_time']} · 已到提醒时间"
+                f"每天 {task['important_reminder_time']} · 提前 {lead} 天开始 · 直到取消"
             )
+        elif schedule_mode == "weekly":
+            weekdays = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+            day = int(task["important_reminder_weekday"] or 1)
+            self.time_label.setText(f"每周 {weekdays[day - 1]} {task['important_reminder_time']} · 直到取消")
+        else:
+            offset = int(task["important_reminder_offset_minutes"]) if "important_reminder_offset_minutes" in task.keys() else 0
+            custom_at = task["important_reminder_at"] if "important_reminder_at" in task.keys() else None
+            if custom_at:
+                self.time_label.setText(f"{custom_at} · 自定义提醒")
+            else:
+                self.time_label.setText(
+                    f"{task['due_time']} · 提前 {offset} 分钟提醒" if offset else f"{task['due_time']} · 已到提醒时间"
+                )
         self.task_title.setText(str(task["title"]))
         self.notes.setText(str(task["notes"]).strip() or "请在方便时处理这件重要事项。")
         waiting = max(0, len(self._order) - 1)

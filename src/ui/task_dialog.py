@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ui.controls import CompactDatePicker, NoWheelComboBox, TIME_HOURS, TIME_MINUTES, normalize_note_text
+from ui.important_schedule import ImportantReminderSchedule
 from ui.task_steps import CompactStepStartButton, TaskStepsEditor
 from ui.theme import APP_STYLE
 
@@ -259,6 +260,10 @@ class TaskDialog(QDialog):
         self.switch_to_reminder_button.setToolTip("提醒事件可设置快捷提醒时间与重复规则；已有内容和分项步骤会保留。")
         self.switch_to_reminder_button.clicked.connect(lambda: self._set_event_type("reminder"))
         reminder_layout.addWidget(self.switch_to_reminder_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.important_schedule = ImportantReminderSchedule()
+        self.important_schedule.load(task) if task else self.important_schedule.set_task_date(self.date_edit.date())
+        self.important_schedule.changed.connect(self._mark_schedule_touched)
+        reminder_layout.addWidget(self.important_schedule)
         self.recurrence_box = QFrame()
         self.recurrence_box.setObjectName("recurrenceBox")
         self.recurrence_box.setStyleSheet(
@@ -335,6 +340,7 @@ class TaskDialog(QDialog):
         self.time_enabled.toggled.connect(self._sync_windows_reminder_availability)
         self.important_reminder_check.toggled.connect(self._sync_windows_reminder_availability)
         self.important_reminder_check.toggled.connect(self._refresh_reminder_details)
+        self.date_edit.dateChanged.connect(self.important_schedule.set_task_date)
         self.recurrence_combo.currentIndexChanged.connect(self._refresh_recurrence_details)
         self._refresh_recurrence_details()
         self._choose_reminder(self._reminder_choice, touched=False)
@@ -363,12 +369,10 @@ class TaskDialog(QDialog):
         type_layout.addStretch()
         form.setVerticalSpacing(3)
         form.addRow("事项标题", title_box)
-        form.addRow("", self.event_type_box)
         form.addRow("", self.steps_editor)
         form.addRow("具体内容", self.notes_section)
         form.addRow("日期", self.date_edit)
         form.addRow("时间", time_box)
-        form.addRow("", self.reminder_event_quick)
         form.addRow("", self.fixed_check)
         divider = QFrame()
         divider.setFrameShape(QFrame.Shape.HLine)
@@ -377,7 +381,6 @@ class TaskDialog(QDialog):
         # Important system push is a deliberate final choice rather than an
         # ordinary scheduling option, so it remains visually separate.
         form.addRow("", self.windows_reminder_box)
-        form.addRow("", self.recurrence_box)
         # A manually taller dialog must leave its spare height below the form,
         # never stretch the title/hint row into a visually random gap.
         layout.addLayout(form, 0)
@@ -423,10 +426,8 @@ class TaskDialog(QDialog):
         due_time = None
         if self.time_enabled.isChecked():
             due_time = f"{self.hour_combo.currentData():02d}:{self.minute_combo.currentData():02d}"
-        reminder_event = self._event_type == "reminder"
-        reminder_enabled = (reminder_event or self.important_reminder_check.isChecked()) and (
-            bool(due_time) or bool(self._legacy_reminder_at and not self._schedule_touched)
-        )
+        reminder_enabled = self.important_reminder_check.isChecked()
+        reminder_values = self.important_schedule.values()
         return {
             "title": self.title_edit.toPlainText().strip(),
             "notes": normalize_note_text(self.notes_edit.toPlainText()).strip(),
@@ -434,12 +435,13 @@ class TaskDialog(QDialog):
             "due_time": due_time,
             "is_fixed": self.fixed_check.isChecked(),
             "windows_reminder_enabled": reminder_enabled,
-            "important_reminder_offset_minutes": (
-                (int(self.custom_offset_combo.currentData() or 60) if self._reminder_choice == "custom"
-                 else int(self._reminder_choice.split(":", 1)[1]))
-                if reminder_enabled and due_time else 0
-            ),
-            "important_reminder_at": self._legacy_reminder_at if not self._schedule_touched else None,
+            "important_reminder_offset_minutes": reminder_values["important_reminder_offset_minutes"] if reminder_enabled else 0,
+            "important_reminder_at": reminder_values["important_reminder_at"],
+            "important_reminder_mode": reminder_values["important_reminder_mode"],
+            "important_reminder_start_date": reminder_values["important_reminder_start_date"],
+            "important_reminder_time": reminder_values["important_reminder_time"],
+            "important_reminder_lead_days": reminder_values["important_reminder_lead_days"],
+            "important_reminder_weekday": reminder_values["important_reminder_weekday"],
             "recurrence_unit": (
                 self.recurrence_unit_combo.currentData()
                 if self.recurrence_combo.currentData() == "custom" else self.recurrence_combo.currentData()
@@ -452,13 +454,15 @@ class TaskDialog(QDialog):
 
     def _sync_windows_reminder_availability(self, enabled: bool) -> None:
         self.reminder_basis_buttons["task_time"].setEnabled(enabled)
+        self.important_schedule.set_task_time_available(enabled)
         self._refresh_reminder_details()
 
     def _refresh_reminder_details(self, *_unused) -> None:
-        active = self._event_type == "reminder" or self.important_reminder_check.isChecked()
-        self.reminder_details.setVisible(active)
+        active = self.important_reminder_check.isChecked()
+        self.reminder_details.setVisible(False)
         self.reminder_basis_host.setVisible(False)
-        self.task_time_choices.setVisible(active)
+        self.task_time_choices.setVisible(False)
+        self.important_schedule.setVisible(active)
 
     def _choose_reminder(self, value: str, *, touched: bool = True) -> None:
         self._reminder_choice = value
@@ -500,19 +504,16 @@ class TaskDialog(QDialog):
     def _refresh_event_type(self) -> None:
         reminder_event = self._event_type == "reminder"
         self.event_type_buttons[self._event_type].setChecked(True)
-        self.event_type_box.setVisible(reminder_event)
-        self.steps_editor.setVisible(not reminder_event and self.steps_editor.row_count() > 0)
-        self.add_step_button.setVisible(not reminder_event)
-        self.important_reminder_check.setVisible(not reminder_event)
-        self.reminder_summary.setText(
-            "提醒事件会在设定时间于右下角置顶提醒。"
-            if reminder_event else "软件会在右下角置顶提醒；关闭提醒不会完成事项。"
-        )
+        self.event_type_box.setVisible(False)
+        self.steps_editor.setVisible(self.steps_editor.row_count() > 0)
+        self.add_step_button.setVisible(True)
+        self.important_reminder_check.setVisible(True)
+        self.reminder_summary.setText("提醒时间独立于事项日期和事项时间；取消提醒不会完成事项。")
         self.reminder_summary.setVisible(True)
-        self.reminder_event_quick.setVisible(reminder_event)
-        self.import_steps_rail.setVisible(not reminder_event)
-        self.switch_to_reminder_button.setVisible(not reminder_event)
-        self.recurrence_box.setVisible(reminder_event)
+        self.reminder_event_quick.setVisible(False)
+        self.import_steps_rail.setVisible(True)
+        self.switch_to_reminder_button.setVisible(False)
+        self.recurrence_box.setVisible(False)
         self._refresh_reminder_details()
         self._refresh_step_layout()
 

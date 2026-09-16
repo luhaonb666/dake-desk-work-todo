@@ -12,7 +12,7 @@ from pathlib import Path
 from PyQt6.QtCore import QDate, QEvent, QTimer, Qt
 from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import (
-    QApplication, QCheckBox, QDialog, QFrame, QHBoxLayout, QLabel,
+    QApplication, QCheckBox, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
     QLineEdit, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea,
     QSplitter, QStackedWidget, QSystemTrayIcon, QTabBar, QVBoxLayout, QWidget,
 )
@@ -32,7 +32,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.6.5"
+APP_VERSION = "4.6.6"
 
 
 def app_icon() -> QIcon:
@@ -237,6 +237,7 @@ class TaskCard(QFrame):
         self, task, on_complete, on_edit, on_float, on_delete, parent=None,
         preview: bool = False, on_select=None, selected: bool = False,
         workspace_mode: bool = False, step_summary: tuple[int, int] = (0, 0), task_steps=None, on_move_today=None,
+        on_cancel_important=None,
     ) -> None:
         super().__init__(parent)
         self._on_select = on_select
@@ -254,10 +255,19 @@ class TaskCard(QFrame):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 10, 10, 10)
         layout.setSpacing(10)
-        check = QCheckBox()
-        check.setChecked(bool(task["is_completed"]))
-        check.toggled.connect(lambda checked: on_complete(task["id"], checked))
-        layout.addWidget(check, 0, Qt.AlignmentFlag.AlignTop)
+        reminder_mode = task["important_reminder_mode"] if "important_reminder_mode" in task.keys() else "follow"
+        independent_important = bool(task["windows_reminder_enabled"]) and reminder_mode in {"deadline", "weekly"}
+        if independent_important:
+            badge = QLabel("重要\n提醒")
+            badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            badge.setStyleSheet("font-size:10px; color:#476b9e; border:1px solid #b8cbe7; border-radius:6px; padding:3px;")
+            badge.setFixedWidth(32)
+            layout.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
+        else:
+            check = QCheckBox()
+            check.setChecked(bool(task["is_completed"]))
+            check.toggled.connect(lambda checked: on_complete(task["id"], checked))
+            layout.addWidget(check, 0, Qt.AlignmentFlag.AlignTop)
         content = QVBoxLayout()
         content.setContentsMargins(0, 0, 0, 0)
         content.setSpacing(2)
@@ -271,8 +281,7 @@ class TaskCard(QFrame):
         )
         content.addWidget(title)
         completed_steps, total_steps = step_summary
-        event_type = task["event_type"] if "event_type" in task.keys() else "todo"
-        show_steps = total_steps and event_type != "reminder"
+        show_steps = total_steps
         if show_steps:
             steps_preview = ExpandableStepsPreview(task_steps)
             if workspace_mode:
@@ -300,6 +309,8 @@ class TaskCard(QFrame):
             content.addWidget(warning)
         layout.addLayout(content, 1)
         actions = [] if workspace_mode else [("编辑", lambda: on_edit(task))]
+        if independent_important and on_cancel_important:
+            actions.append(("取消重要提醒", lambda: on_cancel_important(task)))
         if on_move_today:
             actions.append(("安排到今天继续处理", lambda: on_move_today(task)))
         actions.extend([("浮窗重点位", lambda: on_float(task)), ("删除", lambda: on_delete(task))])
@@ -637,7 +648,8 @@ class MainWindow(QMainWindow):
         fullscreen.clicked.connect(self.toggle_fullscreen)
         header.addWidget(fullscreen)
         header_outer.addLayout(header)
-        details = QHBoxLayout()
+        details = QGridLayout()
+        details.setContentsMargins(0, 0, 0, 0)
         self.subtitle = QLabel()
         self.subtitle.setStyleSheet("font-size:13px; color:#7a8491;")
         self.header_message_group = QWidget()
@@ -646,10 +658,13 @@ class MainWindow(QMainWindow):
         header_message_layout.setSpacing(8)
         header_message_layout.addWidget(self.header_greeting)
         header_message_layout.addWidget(self.precise_overtime)
-        details.addWidget(self.subtitle)
-        details.addStretch(1)
-        details.addWidget(self.header_message_group)
-        details.addStretch(1)
+        # Equal side columns keep the message at the panel's actual centre;
+        # the date never gets to push it right merely because it is present.
+        details.addWidget(self.subtitle, 0, 0, Qt.AlignmentFlag.AlignLeft)
+        details.addWidget(self.header_message_group, 0, 1, Qt.AlignmentFlag.AlignCenter)
+        details.addWidget(QWidget(), 0, 2)
+        details.setColumnStretch(0, 1)
+        details.setColumnStretch(2, 1)
         header_outer.addLayout(details)
         outer.addWidget(header_panel)
 
@@ -855,6 +870,7 @@ class MainWindow(QMainWindow):
         self.workspace_editor.save_requested.connect(self.save_workspace_task)
         self.workspace_editor.duplicate_requested.connect(self.duplicate_workspace_task)
         self.workspace_editor.move_today_requested.connect(self.move_workspace_task_to_today)
+        self.workspace_editor.cancel_important_requested.connect(self.cancel_important_reminder)
         self.workspace_editor_scroll.setWidget(self.workspace_editor)
         right_layout.addWidget(self.workspace_editor_scroll, 1)
         self.workspace_action_bar = self.workspace_editor.detach_action_bar()
@@ -1066,7 +1082,7 @@ class MainWindow(QMainWindow):
             message = "没有找到匹配事项。" if self.workspace_search.text().strip() else {
                 "previous": "之前没有未完成的事项。",
                 "fixed": "还没有固定待办。",
-                "important": "还没有开启准点强提醒的事项。",
+                "important": "还没有开启重要提醒的事项。",
                 "all": "还没有保存的事项。",
                 "unfinished": "这一天没有未完成事项。",
             }.get(self._workspace_scope, "今天还没有事项。")
@@ -1165,6 +1181,11 @@ class MainWindow(QMainWindow):
             recurrence_interval=int(task["recurrence_interval"] or 1) if "recurrence_interval" in task.keys() else 1,
             content_mode=task["content_mode"] if "content_mode" in task.keys() else "notes",
             event_type=task["event_type"] if "event_type" in task.keys() else "todo",
+            important_reminder_mode=task["important_reminder_mode"] if "important_reminder_mode" in task.keys() else "follow",
+            important_reminder_start_date=task["important_reminder_start_date"] if "important_reminder_start_date" in task.keys() else None,
+            important_reminder_time=task["important_reminder_time"] if "important_reminder_time" in task.keys() else None,
+            important_reminder_lead_days=int(task["important_reminder_lead_days"] or 0) if "important_reminder_lead_days" in task.keys() else 0,
+            important_reminder_weekday=task["important_reminder_weekday"] if "important_reminder_weekday" in task.keys() else None,
         )
         self.db.replace_task_steps(copied_id, [
             {"content": step["content"], "is_completed": False}
@@ -1307,7 +1328,7 @@ class MainWindow(QMainWindow):
             section_title = "今天事项" if active_tab == 0 else f"{selected_day} · 未完成"
             self.list_layout.addWidget(self.section_label(section_title))
             for task in normal:
-                self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task), task_steps=self._steps_for(task)))
+                self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task), task_steps=self._steps_for(task), on_cancel_important=self.cancel_important_reminder))
         else:
             empty_text = "今天还没有事项。点击右上角“添加事项”开始安排。" if active_tab == 0 else "这一天没有未完成事项。"
             empty = QLabel(empty_text)
@@ -1318,7 +1339,7 @@ class MainWindow(QMainWindow):
             fixed_label.setFixedHeight(16)
             self.list_layout.addWidget(fixed_label)
             for task in fixed:
-                self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task), task_steps=self._steps_for(task)))
+                self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task), task_steps=self._steps_for(task), on_cancel_important=self.cancel_important_reminder))
         if active_tab == 0:
             tomorrow = (now + timedelta(days=1)).date().isoformat()
             tomorrow_tasks = sorted(
@@ -1339,7 +1360,7 @@ class MainWindow(QMainWindow):
                 preview_layout.addWidget(self.section_label(f"明日事项（{len(tomorrow_tasks)}）", 5))
                 for task in preview:
                     preview_layout.addWidget(
-                        TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, preview=True, step_summary=self._step_summary_for(task), task_steps=self._steps_for(task))
+                        TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, preview=True, step_summary=self._step_summary_for(task), task_steps=self._steps_for(task), on_cancel_important=self.cancel_important_reminder)
                     )
                 if len(tomorrow_tasks) > 2:
                     toggle = QPushButton(
@@ -1369,7 +1390,7 @@ class MainWindow(QMainWindow):
             if task["task_date"] != current_date:
                 current_date = task["task_date"]
                 self.list_layout.addWidget(self.section_label(f"{current_date} · 未完成"))
-            self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task), task_steps=self._steps_for(task)))
+            self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task), task_steps=self._steps_for(task), on_cancel_important=self.cancel_important_reminder))
 
     def _render_all_tasks(self, tasks) -> None:
         if not tasks:
@@ -1382,7 +1403,7 @@ class MainWindow(QMainWindow):
             if task["task_date"] != current_date:
                 current_date = task["task_date"]
                 self.list_layout.addWidget(self.section_label(f"{current_date} · 全部事项"))
-            self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task), task_steps=self._steps_for(task)))
+            self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task), task_steps=self._steps_for(task), on_cancel_important=self.cancel_important_reminder))
 
     @staticmethod
     def _is_past_due(values: dict) -> bool:
@@ -1410,6 +1431,10 @@ class MainWindow(QMainWindow):
         if self._is_past_due(values):
             self.db.mark_alerted(task_id, "pre")
             self.db.mark_alerted(task_id, "due")
+        if values.get("important_reminder_mode") in {"deadline", "weekly"}:
+            # Independent important plans deliberately begin even when their
+            # task date is today or already passed; they end only when cancelled.
+            return
         if values.get("windows_reminder_enabled") and self._is_past_important_reminder(values):
             self.db.acknowledge_important_reminder(task_id)
 
@@ -1505,6 +1530,14 @@ class MainWindow(QMainWindow):
         """Dismiss the reminder only; the underlying task remains unfinished."""
         self.db.acknowledge_important_reminder(task_id)
         self._refresh_important_reminders()
+
+    def cancel_important_reminder(self, task) -> None:
+        """End an independent important plan without completing its item."""
+        task_id = int(task["id"]) if isinstance(task, dict) or hasattr(task, "keys") else int(task)
+        self.db.cancel_important_reminder(task_id)
+        self.important_reminder.remove_task(task_id)
+        self._sync_windows_reminders()
+        self.render()
 
     def snooze_important_reminder(self, task_id: int, minutes: int) -> None:
         """Delay the persistent app reminder without touching the task schedule."""

@@ -10,7 +10,7 @@ from typing import Any, Iterable
 
 
 class Database:
-    SCHEMA_VERSION = 11
+    SCHEMA_VERSION = 12
 
     def __init__(self, path: Path) -> None:
         self.connection = sqlite3.connect(path)
@@ -173,6 +173,21 @@ class Database:
                     "ALTER TABLE tasks ADD COLUMN event_type TEXT NOT NULL DEFAULT 'todo'"
                 )
             version = 11
+        if version < 12:
+            columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(tasks)")}
+            # A reminder plan is separate from the task's own planned time.
+            # Existing opt-in reminders remain in the follow-task mode.
+            for column, definition in (
+                ("important_reminder_mode", "TEXT NOT NULL DEFAULT 'follow'"),
+                ("important_reminder_start_date", "TEXT"),
+                ("important_reminder_time", "TEXT"),
+                ("important_reminder_lead_days", "INTEGER NOT NULL DEFAULT 0"),
+                ("important_reminder_weekday", "INTEGER"),
+                ("important_reminder_last_sent_date", "TEXT"),
+            ):
+                if column not in columns:
+                    self.connection.execute(f"ALTER TABLE tasks ADD COLUMN {column} {definition}")
+            version = 12
         self.connection.execute(
             "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)",
             (str(version),),
@@ -211,6 +226,11 @@ class Database:
         recurrence_interval: int = 1,
         content_mode: str = "notes",
         event_type: str = "todo",
+        important_reminder_mode: str = "follow",
+        important_reminder_start_date: str | None = None,
+        important_reminder_time: str | None = None,
+        important_reminder_lead_days: int = 0,
+        important_reminder_weekday: int | None = None,
     ) -> int:
         now = datetime.now().isoformat(timespec="seconds")
         cursor = self.connection.execute(
@@ -218,14 +238,19 @@ class Database:
                    title, notes, task_date, due_time, is_fixed, windows_reminder_enabled,
                    important_reminder_offset_minutes, important_reminder_at,
                    recurrence_unit, recurrence_interval,
-                   content_mode, event_type, created_at, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   content_mode, event_type,
+                   important_reminder_mode, important_reminder_start_date, important_reminder_time,
+                   important_reminder_lead_days, important_reminder_weekday, created_at, updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 title, notes, task_date, due_time, int(is_fixed), int(windows_reminder_enabled),
                 max(0, int(important_reminder_offset_minutes)),
                 self._normalize_reminder_at(important_reminder_at),
                 self._normalize_recurrence_unit(recurrence_unit), max(1, int(recurrence_interval)),
-                "steps" if content_mode == "steps" else "notes", self._normalize_event_type(event_type), now, now,
+                "steps" if content_mode == "steps" else "notes", self._normalize_event_type(event_type),
+                self._normalize_important_reminder_mode(important_reminder_mode),
+                self._normalize_date(important_reminder_start_date), self._normalize_time(important_reminder_time),
+                max(0, int(important_reminder_lead_days)), self._normalize_weekday(important_reminder_weekday), now, now,
             ),
         )
         self.connection.commit()
@@ -235,6 +260,8 @@ class Database:
         allowed = {
             "title", "notes", "task_date", "due_time", "is_fixed", "float_slot", "windows_reminder_enabled",
             "important_reminder_offset_minutes", "important_reminder_at",
+            "important_reminder_mode", "important_reminder_start_date", "important_reminder_time",
+            "important_reminder_lead_days", "important_reminder_weekday",
             "recurrence_unit", "recurrence_interval",
             "content_mode", "event_type",
         }
@@ -247,6 +274,16 @@ class Database:
             values["important_reminder_offset_minutes"] = max(0, int(values["important_reminder_offset_minutes"]))
         if "important_reminder_at" in values:
             values["important_reminder_at"] = self._normalize_reminder_at(values["important_reminder_at"])
+        if "important_reminder_mode" in values:
+            values["important_reminder_mode"] = self._normalize_important_reminder_mode(values["important_reminder_mode"])
+        if "important_reminder_start_date" in values:
+            values["important_reminder_start_date"] = self._normalize_date(values["important_reminder_start_date"])
+        if "important_reminder_time" in values:
+            values["important_reminder_time"] = self._normalize_time(values["important_reminder_time"])
+        if "important_reminder_lead_days" in values:
+            values["important_reminder_lead_days"] = max(0, int(values["important_reminder_lead_days"]))
+        if "important_reminder_weekday" in values:
+            values["important_reminder_weekday"] = self._normalize_weekday(values["important_reminder_weekday"])
         if "recurrence_unit" in values:
             values["recurrence_unit"] = self._normalize_recurrence_unit(values["recurrence_unit"])
         if "recurrence_interval" in values:
@@ -264,6 +301,13 @@ class Database:
                 and values["important_reminder_offset_minutes"] != current["important_reminder_offset_minutes"]
             )
             or ("important_reminder_at" in values and values["important_reminder_at"] != current["important_reminder_at"])
+            or any(
+                key in values and values[key] != current[key]
+                for key in (
+                    "important_reminder_mode", "important_reminder_start_date", "important_reminder_time",
+                    "important_reminder_lead_days", "important_reminder_weekday",
+                )
+            )
         )
         if time_changed:
             values["pre_alerted_at"] = None
@@ -271,6 +315,7 @@ class Database:
             values["important_acknowledged_at"] = None
             values["important_snoozed_until"] = None
             values["important_repeat_count"] = 0
+            values["important_reminder_last_sent_date"] = None
         values["updated_at"] = datetime.now().isoformat(timespec="seconds")
         assignments = ", ".join(f"{key} = ?" for key in values)
         self.connection.execute(
@@ -302,6 +347,36 @@ class Database:
             return datetime.strptime(str(value), "%Y-%m-%d %H:%M").strftime("%Y-%m-%d %H:%M")
         except ValueError:
             return None
+
+    @staticmethod
+    def _normalize_date(value: str | None) -> str | None:
+        if not value:
+            return None
+        try:
+            return date.fromisoformat(str(value)).isoformat()
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _normalize_time(value: str | None) -> str | None:
+        if not value:
+            return None
+        try:
+            return datetime.strptime(str(value), "%H:%M").strftime("%H:%M")
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _normalize_important_reminder_mode(value: str) -> str:
+        return value if value in {"follow", "deadline", "weekly"} else "follow"
+
+    @staticmethod
+    def _normalize_weekday(value: int | None) -> int | None:
+        try:
+            number = int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+        return number if number in range(1, 8) else None
 
     @staticmethod
     def _normalize_recurrence_unit(value: str) -> str:
@@ -374,6 +449,11 @@ class Database:
             recurrence_unit=task["recurrence_unit"], recurrence_interval=int(task["recurrence_interval"] or 1),
             content_mode=task["content_mode"] if "content_mode" in task.keys() else "notes",
             event_type=task["event_type"] if "event_type" in task.keys() else "todo",
+            important_reminder_mode=task["important_reminder_mode"] if "important_reminder_mode" in task.keys() else "follow",
+            important_reminder_start_date=task["important_reminder_start_date"] if "important_reminder_start_date" in task.keys() else None,
+            important_reminder_time=task["important_reminder_time"] if "important_reminder_time" in task.keys() else None,
+            important_reminder_lead_days=int(task["important_reminder_lead_days"] or 0) if "important_reminder_lead_days" in task.keys() else 0,
+            important_reminder_weekday=task["important_reminder_weekday"] if "important_reminder_weekday" in task.keys() else None,
         )
 
     def delete_task(self, task_id: int) -> None:
@@ -498,6 +578,7 @@ class Database:
             self.connection.execute(
                 """SELECT * FROM tasks
                    WHERE windows_reminder_enabled = 1
+                     AND important_reminder_mode = 'follow'
                      AND (due_time IS NOT NULL OR important_reminder_at IS NOT NULL)
                      AND is_completed = 0
                      AND deleted_at IS NULL
@@ -506,30 +587,88 @@ class Database:
         )
 
     def pending_important_reminder_tasks(self, now: datetime) -> list[sqlite3.Row]:
-        """Important due items which have not yet received the user's acknowledgement."""
-        return list(
-            self.connection.execute(
-                """SELECT * FROM tasks
-                   WHERE windows_reminder_enabled = 1
-                     AND (due_time IS NOT NULL OR important_reminder_at IS NOT NULL)
-                     AND is_completed = 0
-                     AND important_acknowledged_at IS NULL
-                     AND (important_snoozed_until IS NULL OR datetime(important_snoozed_until) <= datetime(?))
-                     AND deleted_at IS NULL
-                   AND datetime(CASE
-                         WHEN important_reminder_at IS NOT NULL THEN important_reminder_at
-                         ELSE task_date || ' ' || due_time
-                       END, CASE WHEN important_reminder_at IS NOT NULL THEN '+0 minutes'
-                                 ELSE '-' || important_reminder_offset_minutes || ' minutes' END) <= datetime(?)
-                   ORDER BY task_date ASC, due_time ASC, created_at ASC""",
-                (now.strftime("%Y-%m-%d %H:%M:%S"), now.strftime("%Y-%m-%d %H:%M:%S")),
-            ).fetchall()
-        )
+        """Return due important plans, keeping independent schedules independent."""
+        rows = list(self.connection.execute(
+            """SELECT * FROM tasks
+               WHERE windows_reminder_enabled = 1 AND is_completed = 0 AND deleted_at IS NULL
+               ORDER BY task_date ASC, created_at ASC"""
+        ).fetchall())
+        pending: list[sqlite3.Row] = []
+        for task in rows:
+            mode = task["important_reminder_mode"] if "important_reminder_mode" in task.keys() else "follow"
+            if mode in {"deadline", "weekly"}:
+                if self._independent_reminder_due(task, now):
+                    pending.append(task)
+                continue
+            if task["important_acknowledged_at"] is not None:
+                continue
+            snoozed_until = task["important_snoozed_until"]
+            if snoozed_until and datetime.fromisoformat(str(snoozed_until)) > now:
+                continue
+            custom_at = task["important_reminder_at"]
+            try:
+                base = (
+                    datetime.strptime(str(custom_at), "%Y-%m-%d %H:%M")
+                    if custom_at else datetime.strptime(f"{task['task_date']} {task['due_time']}", "%Y-%m-%d %H:%M")
+                )
+            except (TypeError, ValueError):
+                continue
+            due_at = base if custom_at else base - timedelta(minutes=max(0, int(task["important_reminder_offset_minutes"] or 0)))
+            if due_at <= now:
+                pending.append(task)
+        return pending
+
+    @staticmethod
+    def _independent_reminder_due(task: sqlite3.Row, now: datetime) -> bool:
+        """One daily deadline campaign or one selected weekly occurrence."""
+        snoozed_until = task["important_snoozed_until"]
+        if snoozed_until:
+            try:
+                if datetime.fromisoformat(str(snoozed_until)) > now:
+                    return False
+            except ValueError:
+                pass
+        if task["important_reminder_last_sent_date"] == now.date().isoformat():
+            return False
+        try:
+            hour, minute = str(task["important_reminder_time"] or "09:00").split(":", 1)
+            trigger_time = now.replace(hour=int(hour), minute=int(minute), second=0, microsecond=0)
+        except (TypeError, ValueError):
+            return False
+        if now < trigger_time:
+            return False
+        mode = task["important_reminder_mode"]
+        if mode == "deadline":
+            try:
+                target = date.fromisoformat(str(task["task_date"]))
+            except ValueError:
+                return False
+            lead = max(0, int(task["important_reminder_lead_days"] or 0))
+            # Deliberately no expiry: after the target day this remains a
+            # strong daily reminder until the user explicitly cancels it.
+            return now.date() >= target - timedelta(days=lead)
+        if mode == "weekly":
+            try:
+                start = date.fromisoformat(str(task["important_reminder_start_date"] or task["task_date"]))
+            except ValueError:
+                return False
+            weekday = int(task["important_reminder_weekday"] or start.isoweekday())
+            return now.date() >= start and now.isoweekday() == weekday
+        return False
 
     def acknowledge_important_reminder(self, task_id: int) -> None:
         now = datetime.now().isoformat(timespec="seconds")
         self.connection.execute(
-            "UPDATE tasks SET important_acknowledged_at = ?, updated_at = ? WHERE id = ?",
+            "UPDATE tasks SET important_acknowledged_at = ?, important_reminder_last_sent_date = ?, updated_at = ? WHERE id = ?",
+            (now, date.today().isoformat(), now, task_id),
+        )
+        self.connection.commit()
+
+    def cancel_important_reminder(self, task_id: int) -> None:
+        """Stop an important plan without completing or deleting its task."""
+        now = datetime.now().isoformat(timespec="seconds")
+        self.connection.execute(
+            "UPDATE tasks SET windows_reminder_enabled = 0, important_acknowledged_at = ?, updated_at = ? WHERE id = ?",
             (now, now, task_id),
         )
         self.connection.commit()
