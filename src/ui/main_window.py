@@ -32,7 +32,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.6.6"
+APP_VERSION = "4.6.7"
 
 
 def app_icon() -> QIcon:
@@ -624,7 +624,10 @@ class MainWindow(QMainWindow):
         title = QLabel(f"{APP_NAME} V{APP_VERSION}")
         title.setStyleSheet("font-size:25px; font-weight:600; color:#27364a;")
         self.header_greeting = QLabel()
-        self.header_greeting.setWordWrap(True)
+        # Keep the original single-line badge dimensions; only its position is
+        # centred in the header, so it must never grow the header vertically.
+        self.header_greeting.setWordWrap(False)
+        self.header_greeting.setMinimumWidth(278)
         self.header_greeting.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.header_greeting.setStyleSheet(
             "background:#f1effa; border:1px solid #ddd7ef; border-radius:10px; color:#66527f; "
@@ -652,17 +655,11 @@ class MainWindow(QMainWindow):
         details.setContentsMargins(0, 0, 0, 0)
         self.subtitle = QLabel()
         self.subtitle.setStyleSheet("font-size:13px; color:#7a8491;")
-        self.header_message_group = QWidget()
-        header_message_layout = QHBoxLayout(self.header_message_group)
-        header_message_layout.setContentsMargins(0, 0, 0, 0)
-        header_message_layout.setSpacing(8)
-        header_message_layout.addWidget(self.header_greeting)
-        header_message_layout.addWidget(self.precise_overtime)
         # Equal side columns keep the message at the panel's actual centre;
         # the date never gets to push it right merely because it is present.
         details.addWidget(self.subtitle, 0, 0, Qt.AlignmentFlag.AlignLeft)
-        details.addWidget(self.header_message_group, 0, 1, Qt.AlignmentFlag.AlignCenter)
-        details.addWidget(QWidget(), 0, 2)
+        details.addWidget(self.header_greeting, 0, 1, Qt.AlignmentFlag.AlignCenter)
+        details.addWidget(self.precise_overtime, 0, 2, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         details.setColumnStretch(0, 1)
         details.setColumnStretch(2, 1)
         header_outer.addLayout(details)
@@ -1183,6 +1180,7 @@ class MainWindow(QMainWindow):
             event_type=task["event_type"] if "event_type" in task.keys() else "todo",
             important_reminder_mode=task["important_reminder_mode"] if "important_reminder_mode" in task.keys() else "follow",
             important_reminder_start_date=task["important_reminder_start_date"] if "important_reminder_start_date" in task.keys() else None,
+            important_reminder_target_date=task["important_reminder_target_date"] if "important_reminder_target_date" in task.keys() else None,
             important_reminder_time=task["important_reminder_time"] if "important_reminder_time" in task.keys() else None,
             important_reminder_lead_days=int(task["important_reminder_lead_days"] or 0) if "important_reminder_lead_days" in task.keys() else 0,
             important_reminder_weekday=task["important_reminder_weekday"] if "important_reminder_weekday" in task.keys() else None,

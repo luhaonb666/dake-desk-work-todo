@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ui.controls import CompactDatePicker, NoWheelComboBox, TIME_HOURS, TIME_MINUTES, normalize_note_text
-from ui.important_schedule import ImportantReminderSchedule
+from ui.important_schedule import ImportantReminderEditorDialog, ImportantReminderSchedule
 from ui.task_steps import CompactStepStartButton, TaskStepsEditor
 from ui.theme import APP_STYLE
 
@@ -83,6 +83,9 @@ class TaskDialog(QDialog):
     def __init__(self, task=None, parent=None, *, task_steps=None) -> None:
         super().__init__(parent)
         self.task = task
+        # A new item is constructed without a task object.  Existing task
+        # dictionaries from older call sites may not carry an id yet.
+        self._is_existing_task = bool(task)
         self._duplicate_requested = False
         self.setObjectName("taskDialog")
         self.setWindowTitle("编辑事项" if task else "添加事项")
@@ -193,7 +196,21 @@ class TaskDialog(QDialog):
         reminder_layout = QVBoxLayout(self.windows_reminder_box)
         reminder_layout.setContentsMargins(10, 7, 10, 7)
         reminder_layout.setSpacing(5)
-        reminder_layout.addWidget(self.important_reminder_check)
+        reminder_header = QHBoxLayout()
+        reminder_header.setContentsMargins(0, 0, 0, 0)
+        reminder_header.addWidget(self.important_reminder_check)
+        reminder_header.addStretch()
+        self.open_important_editor_button = QPushButton("设置重要提醒")
+        self.open_important_editor_button.setObjectName("importantReminderEditorButton")
+        self.open_important_editor_button.setToolTip("在独立页面设置提醒时间与重复方式，不会改动待办日期或时间。")
+        self.open_important_editor_button.clicked.connect(self._edit_important_reminder)
+        self.open_important_editor_button.setStyleSheet(
+            "QPushButton#importantReminderEditorButton { min-width:150px; padding:6px 14px; color:#426b9f; "
+            "background:#fff; border:1px solid #9db9df; border-radius:8px; font-weight:600; }"
+            "QPushButton#importantReminderEditorButton:hover { background:#edf4ff; border-color:#6f95cf; }"
+        )
+        reminder_header.addWidget(self.open_important_editor_button)
+        reminder_layout.addLayout(reminder_header)
         self.reminder_summary = QLabel("软件会在右下角置顶提醒；关闭提醒不会完成事项。")
         self.reminder_summary.setWordWrap(True)
         self.reminder_summary.setStyleSheet("font-size:11px; color:#718096; background:transparent; padding-left:23px;")
@@ -392,9 +409,9 @@ class TaskDialog(QDialog):
         self.follow_up_button = QPushButton("保留原事项，另建后续")
         self.follow_up_button.setObjectName("quietButton")
         self.follow_up_button.setToolTip("保留原事项，新建一条后续事项；分项步骤会从未完成开始。")
-        self.follow_up_button.setVisible(bool(task))
         self.follow_up_button.clicked.connect(self._accept_as_follow_up)
         buttons.addButton(self.follow_up_button, QDialogButtonBox.ButtonRole.ActionRole)
+        self.follow_up_button.setVisible(self._is_existing_task)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -439,6 +456,7 @@ class TaskDialog(QDialog):
             "important_reminder_at": reminder_values["important_reminder_at"],
             "important_reminder_mode": reminder_values["important_reminder_mode"],
             "important_reminder_start_date": reminder_values["important_reminder_start_date"],
+            "important_reminder_target_date": reminder_values["important_reminder_target_date"],
             "important_reminder_time": reminder_values["important_reminder_time"],
             "important_reminder_lead_days": reminder_values["important_reminder_lead_days"],
             "important_reminder_weekday": reminder_values["important_reminder_weekday"],
@@ -462,7 +480,19 @@ class TaskDialog(QDialog):
         self.reminder_details.setVisible(False)
         self.reminder_basis_host.setVisible(False)
         self.task_time_choices.setVisible(False)
-        self.important_schedule.setVisible(active)
+        self.important_schedule.setVisible(False)
+        self.open_important_editor_button.setText("修改重要提醒" if active else "设置重要提醒")
+
+    def _edit_important_reminder(self) -> None:
+        dialog = ImportantReminderEditorDialog(self.date_edit.date(), self.important_schedule.values(), self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.important_schedule.load({
+                "task_date": self.date_edit.date().toString("yyyy-MM-dd"),
+                **dialog.values(),
+            })
+            self.important_reminder_check.setChecked(True)
+            self._mark_schedule_touched()
+            self._refresh_reminder_details()
 
     def _choose_reminder(self, value: str, *, touched: bool = True) -> None:
         self._reminder_choice = value

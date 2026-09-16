@@ -1,4 +1,4 @@
-"""Focused V4.6.6 regression checks for settings, reminders, and task views."""
+"""Focused V4.6.7 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -516,6 +516,32 @@ class V200Tests(unittest.TestCase):
         self.assertEqual(dialog.values()["important_reminder_mode"], "deadline")
         self.assertTrue(dialog.values()["windows_reminder_enabled"])
         self.assertFalse(dialog.add_step_button.isHidden())
+
+    def test_v467_important_reminder_opens_from_a_focused_editor_entry(self) -> None:
+        dialog = TaskDialog()
+        self.assertEqual(dialog.open_important_editor_button.text(), "设置重要提醒")
+        self.assertTrue(dialog.important_schedule.isHidden())
+        dialog.important_reminder_check.setChecked(True)
+        self.assertEqual(dialog.open_important_editor_button.text(), "修改重要提醒")
+        self.assertTrue(dialog.important_schedule.isHidden())
+        self.assertTrue(dialog.follow_up_button.isHidden())
+
+    def test_v467_deadline_target_is_independent_from_the_task_date(self) -> None:
+        task_id = self.db.add_task(
+            "月底提交材料", "", "2026-09-16", None, False,
+            windows_reminder_enabled=True,
+            important_reminder_mode="deadline",
+            important_reminder_target_date="2026-09-30",
+            important_reminder_time="12:00",
+            important_reminder_lead_days=7,
+        )
+        task = self.db.task_by_id(task_id)
+        self.assertEqual(task["task_date"], "2026-09-16")
+        self.assertEqual(task["important_reminder_target_date"], "2026-09-30")
+        self.assertEqual(
+            [item["id"] for item in self.db.pending_important_reminder_tasks(datetime(2026, 9, 23, 12, 0))],
+            [task_id],
+        )
 
     def test_reminder_event_hides_but_preserves_existing_steps(self) -> None:
         task_id = self.db.add_task("会议准备", "带齐材料", "2026-09-01", "10:00", False)

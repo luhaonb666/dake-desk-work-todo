@@ -10,7 +10,7 @@ from typing import Any, Iterable
 
 
 class Database:
-    SCHEMA_VERSION = 12
+    SCHEMA_VERSION = 13
 
     def __init__(self, path: Path) -> None:
         self.connection = sqlite3.connect(path)
@@ -188,6 +188,11 @@ class Database:
                 if column not in columns:
                     self.connection.execute(f"ALTER TABLE tasks ADD COLUMN {column} {definition}")
             version = 12
+        if version < 13:
+            columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(tasks)")}
+            if "important_reminder_target_date" not in columns:
+                self.connection.execute("ALTER TABLE tasks ADD COLUMN important_reminder_target_date TEXT")
+            version = 13
         self.connection.execute(
             "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)",
             (str(version),),
@@ -228,6 +233,7 @@ class Database:
         event_type: str = "todo",
         important_reminder_mode: str = "follow",
         important_reminder_start_date: str | None = None,
+        important_reminder_target_date: str | None = None,
         important_reminder_time: str | None = None,
         important_reminder_lead_days: int = 0,
         important_reminder_weekday: int | None = None,
@@ -239,9 +245,9 @@ class Database:
                    important_reminder_offset_minutes, important_reminder_at,
                    recurrence_unit, recurrence_interval,
                    content_mode, event_type,
-                   important_reminder_mode, important_reminder_start_date, important_reminder_time,
+                   important_reminder_mode, important_reminder_start_date, important_reminder_target_date, important_reminder_time,
                    important_reminder_lead_days, important_reminder_weekday, created_at, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 title, notes, task_date, due_time, int(is_fixed), int(windows_reminder_enabled),
                 max(0, int(important_reminder_offset_minutes)),
@@ -249,7 +255,7 @@ class Database:
                 self._normalize_recurrence_unit(recurrence_unit), max(1, int(recurrence_interval)),
                 "steps" if content_mode == "steps" else "notes", self._normalize_event_type(event_type),
                 self._normalize_important_reminder_mode(important_reminder_mode),
-                self._normalize_date(important_reminder_start_date), self._normalize_time(important_reminder_time),
+                self._normalize_date(important_reminder_start_date), self._normalize_date(important_reminder_target_date), self._normalize_time(important_reminder_time),
                 max(0, int(important_reminder_lead_days)), self._normalize_weekday(important_reminder_weekday), now, now,
             ),
         )
@@ -260,7 +266,7 @@ class Database:
         allowed = {
             "title", "notes", "task_date", "due_time", "is_fixed", "float_slot", "windows_reminder_enabled",
             "important_reminder_offset_minutes", "important_reminder_at",
-            "important_reminder_mode", "important_reminder_start_date", "important_reminder_time",
+            "important_reminder_mode", "important_reminder_start_date", "important_reminder_target_date", "important_reminder_time",
             "important_reminder_lead_days", "important_reminder_weekday",
             "recurrence_unit", "recurrence_interval",
             "content_mode", "event_type",
@@ -278,6 +284,8 @@ class Database:
             values["important_reminder_mode"] = self._normalize_important_reminder_mode(values["important_reminder_mode"])
         if "important_reminder_start_date" in values:
             values["important_reminder_start_date"] = self._normalize_date(values["important_reminder_start_date"])
+        if "important_reminder_target_date" in values:
+            values["important_reminder_target_date"] = self._normalize_date(values["important_reminder_target_date"])
         if "important_reminder_time" in values:
             values["important_reminder_time"] = self._normalize_time(values["important_reminder_time"])
         if "important_reminder_lead_days" in values:
@@ -304,7 +312,7 @@ class Database:
             or any(
                 key in values and values[key] != current[key]
                 for key in (
-                    "important_reminder_mode", "important_reminder_start_date", "important_reminder_time",
+                    "important_reminder_mode", "important_reminder_start_date", "important_reminder_target_date", "important_reminder_time",
                     "important_reminder_lead_days", "important_reminder_weekday",
                 )
             )
@@ -451,6 +459,7 @@ class Database:
             event_type=task["event_type"] if "event_type" in task.keys() else "todo",
             important_reminder_mode=task["important_reminder_mode"] if "important_reminder_mode" in task.keys() else "follow",
             important_reminder_start_date=task["important_reminder_start_date"] if "important_reminder_start_date" in task.keys() else None,
+            important_reminder_target_date=task["important_reminder_target_date"] if "important_reminder_target_date" in task.keys() else None,
             important_reminder_time=task["important_reminder_time"] if "important_reminder_time" in task.keys() else None,
             important_reminder_lead_days=int(task["important_reminder_lead_days"] or 0) if "important_reminder_lead_days" in task.keys() else 0,
             important_reminder_weekday=task["important_reminder_weekday"] if "important_reminder_weekday" in task.keys() else None,
@@ -640,7 +649,7 @@ class Database:
         mode = task["important_reminder_mode"]
         if mode == "deadline":
             try:
-                target = date.fromisoformat(str(task["task_date"]))
+                target = date.fromisoformat(str(task["important_reminder_target_date"] or task["task_date"]))
             except ValueError:
                 return False
             lead = max(0, int(task["important_reminder_lead_days"] or 0))

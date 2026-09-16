@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 
 from PyQt6.QtCore import QDate, Qt, pyqtSignal
-from PyQt6.QtWidgets import QButtonGroup, QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QButtonGroup, QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from ui.controls import CompactDatePicker, NoWheelComboBox, TIME_HOURS, TIME_MINUTES
 
@@ -23,6 +23,7 @@ class ImportantReminderSchedule(QFrame):
         )
         self._mode = "follow"
         self._task_date = QDate.currentDate()
+        self._deadline_target_explicit = False
         self._loading = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 8, 10, 9)
@@ -86,6 +87,10 @@ class ImportantReminderSchedule(QFrame):
         deadline = QHBoxLayout(self.deadline_panel)
         deadline.setContentsMargins(0, 0, 0, 0)
         deadline.setSpacing(5)
+        deadline.addWidget(QLabel("目标日期"))
+        self.deadline_target = CompactDatePicker()
+        self.deadline_target.setDate(self._task_date)
+        deadline.addWidget(self.deadline_target)
         self.deadline_start_label = QLabel()
         deadline.addWidget(self.deadline_start_label)
         self.lead_days = NoWheelComboBox()
@@ -133,6 +138,7 @@ class ImportantReminderSchedule(QFrame):
             if hasattr(widget, "currentIndexChanged"):
                 widget.currentIndexChanged.connect(self._on_changed)
         self.weekly_start.dateChanged.connect(self._on_changed)
+        self.deadline_target.dateChanged.connect(self._on_deadline_target_changed)
         self._set_offset(0, emit=False)
         self._set_mode("follow", emit=False)
 
@@ -154,7 +160,15 @@ class ImportantReminderSchedule(QFrame):
 
     def set_task_date(self, value: QDate) -> None:
         self._task_date = value
+        if not self._deadline_target_explicit:
+            self.deadline_target.setDate(value)
         self._refresh_deadline_copy()
+
+    def _on_deadline_target_changed(self, *_unused) -> None:
+        if not self._loading:
+            self._deadline_target_explicit = True
+            self._refresh_deadline_copy()
+            self.changed.emit()
 
     def set_task_time_available(self, available: bool) -> None:
         button = self.mode_buttons["follow"]
@@ -165,7 +179,7 @@ class ImportantReminderSchedule(QFrame):
 
     def _refresh_deadline_copy(self) -> None:
         today = QDate.currentDate()
-        if self._task_date > today:
+        if self.deadline_target.date() > today:
             self.deadline_start_label.setText("提醒从")
             self.lead_days.setVisible(True)
         else:
@@ -220,6 +234,9 @@ class ImportantReminderSchedule(QFrame):
         self._loading = True
         mode = task["important_reminder_mode"] if "important_reminder_mode" in task.keys() else "follow"
         self.set_task_date(QDate.fromString(task["task_date"], "yyyy-MM-dd"))
+        target = task["important_reminder_target_date"] if "important_reminder_target_date" in task.keys() else None
+        self._deadline_target_explicit = bool(target)
+        self.deadline_target.setDate(QDate.fromString(str(target or task["task_date"]), "yyyy-MM-dd"))
         self._set_mode(str(mode), emit=False)
         offset = int(task["important_reminder_offset_minutes"] or 0) if "important_reminder_offset_minutes" in task.keys() else 0
         if offset in self.offset_buttons:
@@ -245,24 +262,67 @@ class ImportantReminderSchedule(QFrame):
         if self._mode == "follow":
             reminder_time = None
             start_date = None
+            target_date = None
             weekday = None
             lead_days = 0
         elif self._mode == "deadline":
             reminder_time = f"{self.deadline_hour.currentData():02d}:{self.deadline_minute.currentData():02d}"
             start_date = None
+            target_date = self.deadline_target.date().toString("yyyy-MM-dd")
             weekday = None
             lead_days = int(self.lead_days.currentData() or 0)
         else:
             reminder_time = f"{self.weekly_hour.currentData():02d}:{self.weekly_minute.currentData():02d}"
             start_date = self.weekly_start.date().toString("yyyy-MM-dd")
+            target_date = None
             weekday = int(self.weekday.currentData())
             lead_days = 0
         return {
             "important_reminder_mode": self._mode,
             "important_reminder_offset_minutes": self._offset_minutes if self._mode == "follow" else 0,
             "important_reminder_start_date": start_date,
+            "important_reminder_target_date": target_date,
             "important_reminder_time": reminder_time,
             "important_reminder_lead_days": lead_days,
             "important_reminder_weekday": weekday,
             "important_reminder_at": None,
         }
+
+
+class ImportantReminderEditorDialog(QDialog):
+    """A focused editor for an important reminder plan, separate from a to-do."""
+
+    def __init__(self, task_date: QDate, values: dict, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("重要提醒")
+        self.setMinimumWidth(470)
+        self.setStyleSheet("QDialog { background:#f7f9fc; }")
+        layout = QVBoxLayout(self)
+        top = QHBoxLayout()
+        back = QPushButton("← 切回普通待办")
+        back.setObjectName("quietButton")
+        back.clicked.connect(self.reject)
+        top.addWidget(back)
+        top.addStretch()
+        layout.addLayout(top)
+        title = QLabel("重要提醒设置")
+        title.setStyleSheet("font-size:18px; font-weight:600; color:#2c3a4d;")
+        layout.addWidget(title)
+        hint = QLabel("提醒计划独立于事项日期和事项时间；保存后会持续提醒，直到你取消重要提醒。")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("font-size:12px; color:#718096;")
+        layout.addWidget(hint)
+        self.schedule = ImportantReminderSchedule()
+        self.schedule.load({
+            "task_date": task_date.toString("yyyy-MM-dd"),
+            **values,
+        })
+        layout.addWidget(self.schedule)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Save)
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText("完成提醒设置")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def values(self) -> dict:
+        return self.schedule.values()
