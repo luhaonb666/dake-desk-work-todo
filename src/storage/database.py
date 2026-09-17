@@ -10,7 +10,7 @@ from typing import Any, Iterable
 
 
 class Database:
-    SCHEMA_VERSION = 13
+    SCHEMA_VERSION = 14
 
     def __init__(self, path: Path) -> None:
         self.connection = sqlite3.connect(path)
@@ -193,6 +193,15 @@ class Database:
             if "important_reminder_target_date" not in columns:
                 self.connection.execute("ALTER TABLE tasks ADD COLUMN important_reminder_target_date TEXT")
             version = 13
+        if version < 14:
+            columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(tasks)")}
+            for column, definition in (
+                ("important_reminder_repeat_unit", "TEXT NOT NULL DEFAULT 'week'"),
+                ("important_reminder_repeat_interval", "INTEGER NOT NULL DEFAULT 1"),
+            ):
+                if column not in columns:
+                    self.connection.execute(f"ALTER TABLE tasks ADD COLUMN {column} {definition}")
+            version = 14
         self.connection.execute(
             "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)",
             (str(version),),
@@ -237,6 +246,8 @@ class Database:
         important_reminder_time: str | None = None,
         important_reminder_lead_days: int = 0,
         important_reminder_weekday: int | None = None,
+        important_reminder_repeat_unit: str = "week",
+        important_reminder_repeat_interval: int = 1,
     ) -> int:
         now = datetime.now().isoformat(timespec="seconds")
         cursor = self.connection.execute(
@@ -246,8 +257,9 @@ class Database:
                    recurrence_unit, recurrence_interval,
                    content_mode, event_type,
                    important_reminder_mode, important_reminder_start_date, important_reminder_target_date, important_reminder_time,
-                   important_reminder_lead_days, important_reminder_weekday, created_at, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   important_reminder_lead_days, important_reminder_weekday,
+                   important_reminder_repeat_unit, important_reminder_repeat_interval, created_at, updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 title, notes, task_date, due_time, int(is_fixed), int(windows_reminder_enabled),
                 max(0, int(important_reminder_offset_minutes)),
@@ -256,7 +268,8 @@ class Database:
                 "steps" if content_mode == "steps" else "notes", self._normalize_event_type(event_type),
                 self._normalize_important_reminder_mode(important_reminder_mode),
                 self._normalize_date(important_reminder_start_date), self._normalize_date(important_reminder_target_date), self._normalize_time(important_reminder_time),
-                max(0, int(important_reminder_lead_days)), self._normalize_weekday(important_reminder_weekday), now, now,
+                max(0, int(important_reminder_lead_days)), self._normalize_weekday(important_reminder_weekday),
+                self._normalize_important_repeat_unit(important_reminder_repeat_unit), max(1, int(important_reminder_repeat_interval)), now, now,
             ),
         )
         self.connection.commit()
@@ -267,7 +280,7 @@ class Database:
             "title", "notes", "task_date", "due_time", "is_fixed", "float_slot", "windows_reminder_enabled",
             "important_reminder_offset_minutes", "important_reminder_at",
             "important_reminder_mode", "important_reminder_start_date", "important_reminder_target_date", "important_reminder_time",
-            "important_reminder_lead_days", "important_reminder_weekday",
+            "important_reminder_lead_days", "important_reminder_weekday", "important_reminder_repeat_unit", "important_reminder_repeat_interval",
             "recurrence_unit", "recurrence_interval",
             "content_mode", "event_type",
         }
@@ -292,6 +305,10 @@ class Database:
             values["important_reminder_lead_days"] = max(0, int(values["important_reminder_lead_days"]))
         if "important_reminder_weekday" in values:
             values["important_reminder_weekday"] = self._normalize_weekday(values["important_reminder_weekday"])
+        if "important_reminder_repeat_unit" in values:
+            values["important_reminder_repeat_unit"] = self._normalize_important_repeat_unit(values["important_reminder_repeat_unit"])
+        if "important_reminder_repeat_interval" in values:
+            values["important_reminder_repeat_interval"] = max(1, int(values["important_reminder_repeat_interval"]))
         if "recurrence_unit" in values:
             values["recurrence_unit"] = self._normalize_recurrence_unit(values["recurrence_unit"])
         if "recurrence_interval" in values:
@@ -313,7 +330,7 @@ class Database:
                 key in values and values[key] != current[key]
                 for key in (
                     "important_reminder_mode", "important_reminder_start_date", "important_reminder_target_date", "important_reminder_time",
-                    "important_reminder_lead_days", "important_reminder_weekday",
+                    "important_reminder_lead_days", "important_reminder_weekday", "important_reminder_repeat_unit", "important_reminder_repeat_interval",
                 )
             )
         )
@@ -377,6 +394,10 @@ class Database:
     @staticmethod
     def _normalize_important_reminder_mode(value: str) -> str:
         return value if value in {"follow", "deadline", "weekly"} else "follow"
+
+    @staticmethod
+    def _normalize_important_repeat_unit(value: str) -> str:
+        return value if value in {"day", "week", "month", "year"} else "week"
 
     @staticmethod
     def _normalize_weekday(value: int | None) -> int | None:
@@ -463,6 +484,8 @@ class Database:
             important_reminder_time=task["important_reminder_time"] if "important_reminder_time" in task.keys() else None,
             important_reminder_lead_days=int(task["important_reminder_lead_days"] or 0) if "important_reminder_lead_days" in task.keys() else 0,
             important_reminder_weekday=task["important_reminder_weekday"] if "important_reminder_weekday" in task.keys() else None,
+            important_reminder_repeat_unit=task["important_reminder_repeat_unit"] if "important_reminder_repeat_unit" in task.keys() else "week",
+            important_reminder_repeat_interval=int(task["important_reminder_repeat_interval"] or 1) if "important_reminder_repeat_interval" in task.keys() else 1,
         )
 
     def delete_task(self, task_id: int) -> None:
@@ -629,7 +652,7 @@ class Database:
 
     @staticmethod
     def _independent_reminder_due(task: sqlite3.Row, now: datetime) -> bool:
-        """One daily deadline campaign or one selected weekly occurrence."""
+        """One deadline campaign or one repeating independent occurrence."""
         snoozed_until = task["important_snoozed_until"]
         if snoozed_until:
             try:
@@ -661,8 +684,22 @@ class Database:
                 start = date.fromisoformat(str(task["important_reminder_start_date"] or task["task_date"]))
             except ValueError:
                 return False
-            weekday = int(task["important_reminder_weekday"] or start.isoweekday())
-            return now.date() >= start and now.isoweekday() == weekday
+            unit = Database._normalize_important_repeat_unit(task["important_reminder_repeat_unit"])
+            interval = max(1, int(task["important_reminder_repeat_interval"] or 1))
+            current = now.date()
+            if current < start:
+                return False
+            if unit == "day":
+                return (current - start).days % interval == 0
+            if unit == "week":
+                weekday = int(task["important_reminder_weekday"] or start.isoweekday())
+                first = start + timedelta(days=(weekday - start.isoweekday()) % 7)
+                return current >= first and current.isoweekday() == weekday and ((current - first).days // 7) % interval == 0
+            if unit == "month":
+                months = (current.year - start.year) * 12 + current.month - start.month
+                return months >= 0 and months % interval == 0 and current.day == min(start.day, monthrange(current.year, current.month)[1])
+            years = current.year - start.year
+            return years >= 0 and years % interval == 0 and current.month == start.month and current.day == min(start.day, monthrange(current.year, start.month)[1])
         return False
 
     def acknowledge_important_reminder(self, task_id: int) -> None:

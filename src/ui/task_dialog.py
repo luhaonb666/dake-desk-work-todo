@@ -506,6 +506,8 @@ class TaskDialog(QDialog):
             "important_reminder_time": reminder_values["important_reminder_time"],
             "important_reminder_lead_days": reminder_values["important_reminder_lead_days"],
             "important_reminder_weekday": reminder_values["important_reminder_weekday"],
+            "important_reminder_repeat_unit": reminder_values["important_reminder_repeat_unit"],
+            "important_reminder_repeat_interval": reminder_values["important_reminder_repeat_interval"],
             "recurrence_unit": (
                 self.recurrence_unit_combo.currentData()
                 if self.recurrence_combo.currentData() == "custom" else self.recurrence_combo.currentData()

@@ -1,4 +1,4 @@
-"""Focused V4.6.9 regression checks for settings, reminders, and task views."""
+"""Focused V4.7.0 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -605,6 +605,50 @@ class V200Tests(unittest.TestCase):
             [task_id],
         )
         self.assertEqual(self.db.pending_important_reminder_tasks(datetime(2026, 9, 17, 12, 0)), [])
+
+    def test_v470_periodic_reminder_supports_day_and_week_intervals(self) -> None:
+        every_three_days = self.db.add_task(
+            "每三天检查", "", "2026-09-16", None, False,
+            windows_reminder_enabled=True,
+            important_reminder_mode="weekly",
+            important_reminder_start_date="2026-09-16",
+            important_reminder_time="12:00",
+            important_reminder_repeat_unit="day",
+            important_reminder_repeat_interval=3,
+        )
+        every_two_weeks = self.db.add_task(
+            "双周例会", "", "2026-09-16", None, False,
+            windows_reminder_enabled=True,
+            important_reminder_mode="weekly",
+            important_reminder_start_date="2026-09-16",
+            important_reminder_time="12:00",
+            important_reminder_weekday=3,
+            important_reminder_repeat_unit="week",
+            important_reminder_repeat_interval=2,
+        )
+        self.assertEqual(
+            {task["id"] for task in self.db.pending_important_reminder_tasks(datetime(2026, 9, 19, 12, 0))},
+            {every_three_days},
+        )
+        self.assertEqual(
+            {task["id"] for task in self.db.pending_important_reminder_tasks(datetime(2026, 9, 30, 12, 0))},
+            {every_two_weeks},
+        )
+
+    def test_v470_periodic_editor_keeps_repeat_controls_in_its_existing_mode(self) -> None:
+        dialog = TaskDialog()
+        dialog.important_schedule._set_mode("weekly")
+        schedule = dialog.important_schedule
+        schedule.repeat_frequency.setCurrentIndex(schedule._repeat_preset_index("custom", 0))
+        schedule.repeat_unit.setCurrentIndex(schedule.repeat_unit.findData("day"))
+        schedule.repeat_interval.setValue(3)
+        values = schedule.values()
+        self.assertEqual(values["important_reminder_repeat_unit"], "day")
+        self.assertEqual(values["important_reminder_repeat_interval"], 3)
+        self.assertFalse(schedule.custom_repeat_row.isHidden())
+
+    def test_v470_past_date_without_time_is_past_due(self) -> None:
+        self.assertTrue(MainWindow._is_past_due({"task_date": "2020-01-01", "due_time": None}))
 
     def test_system_reminder_plan_excludes_past_and_non_opted_in_items(self) -> None:
         enabled = self.db.add_task("重要会议", "", "2026-09-01", "10:00", False, True)

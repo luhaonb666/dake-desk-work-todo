@@ -6,7 +6,7 @@ import json
 import logging
 import random
 import sys
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from PyQt6.QtCore import QDate, QEvent, QTimer, Qt
@@ -32,7 +32,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.6.9"
+APP_VERSION = "4.7.0"
 
 
 def app_icon() -> QIcon:
@@ -243,9 +243,18 @@ class TaskCard(QFrame):
         self._on_select = on_select
         self._task = task
         self.setObjectName("taskCard")
-        overdue = bool(task["due_time"] and not task["is_completed"] and datetime.strptime(
-            f"{task['task_date']} {task['due_time']}", "%Y-%m-%d %H:%M"
-        ) < datetime.now())
+        overdue = False
+        if not task["is_completed"]:
+            try:
+                item_date = date.fromisoformat(str(task["task_date"]))
+                today = datetime.now().date()
+                overdue = item_date < today or (
+                    item_date == today
+                    and bool(task["due_time"])
+                    and datetime.strptime(f"{task['task_date']} {task['due_time']}", "%Y-%m-%d %H:%M") < datetime.now()
+                )
+            except (TypeError, ValueError):
+                overdue = False
         state = "preview" if preview else ("fixed" if task["is_fixed"] else ("overdue" if overdue else "normal"))
         color, border = TASK_CARD_COLORS[state]
         self._card_color, self._card_border = color, border
@@ -1184,6 +1193,8 @@ class MainWindow(QMainWindow):
             important_reminder_time=task["important_reminder_time"] if "important_reminder_time" in task.keys() else None,
             important_reminder_lead_days=int(task["important_reminder_lead_days"] or 0) if "important_reminder_lead_days" in task.keys() else 0,
             important_reminder_weekday=task["important_reminder_weekday"] if "important_reminder_weekday" in task.keys() else None,
+            important_reminder_repeat_unit=task["important_reminder_repeat_unit"] if "important_reminder_repeat_unit" in task.keys() else "week",
+            important_reminder_repeat_interval=int(task["important_reminder_repeat_interval"] or 1) if "important_reminder_repeat_interval" in task.keys() else 1,
         )
         self.db.replace_task_steps(copied_id, [
             {"content": step["content"], "is_completed": False}
@@ -1405,12 +1416,18 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _is_past_due(values: dict) -> bool:
-        due_time = values.get("due_time")
         task_date = values.get("task_date")
-        if not due_time or not task_date:
+        if not task_date:
             return False
         try:
-            return datetime.strptime(f"{task_date} {due_time}", "%Y-%m-%d %H:%M") <= datetime.now()
+            item_date = date.fromisoformat(str(task_date))
+            today = datetime.now().date()
+            if item_date < today:
+                return True
+            due_time = values.get("due_time")
+            return bool(due_time and item_date == today and datetime.strptime(
+                f"{task_date} {due_time}", "%Y-%m-%d %H:%M"
+            ) <= datetime.now())
         except (TypeError, ValueError):
             return False
 

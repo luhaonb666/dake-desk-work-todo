@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from datetime import date
 
-from PyQt6.QtCore import QDate, Qt, pyqtSignal
-from PyQt6.QtWidgets import QButtonGroup, QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtCore import QDate, QTimer, Qt, pyqtSignal
+from PyQt6.QtWidgets import QButtonGroup, QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QLabel, QPushButton, QSpinBox, QVBoxLayout, QWidget
 
 from ui.controls import CompactDatePicker, NoWheelComboBox, TIME_HOURS, TIME_MINUTES
 
@@ -111,26 +111,68 @@ class ImportantReminderSchedule(QFrame):
         layout.addWidget(self.deadline_hint)
 
         self.weekly_panel = QWidget()
-        weekly = QHBoxLayout(self.weekly_panel)
+        weekly = QVBoxLayout(self.weekly_panel)
         weekly.setContentsMargins(0, 0, 0, 0)
         weekly.setSpacing(5)
-        weekly.addWidget(QLabel("从"))
+        weekly_time_row = QHBoxLayout()
+        weekly_time_row.setContentsMargins(0, 0, 0, 0)
+        weekly_time_row.setSpacing(5)
+        weekly_time_row.addWidget(QLabel("开始于"))
         self.weekly_start = CompactDatePicker()
         self.weekly_start.setDate(QDate.currentDate())
-        weekly.addWidget(self.weekly_start)
-        weekly.addWidget(QLabel("起每周"))
+        weekly_time_row.addWidget(self.weekly_start)
+        weekly_time_row.addWidget(QLabel("提醒时间"))
+        self.weekly_hour = self._hour_combo()
+        self.weekly_minute = self._minute_combo()
+        weekly_time_row.addWidget(self.weekly_hour)
+        weekly_time_row.addWidget(self.weekly_minute)
+        weekly_time_row.addWidget(QLabel("提醒"))
+        weekly_time_row.addStretch()
+        weekly.addLayout(weekly_time_row)
+
+        weekly_frequency_row = QHBoxLayout()
+        weekly_frequency_row.setContentsMargins(0, 0, 0, 0)
+        weekly_frequency_row.setSpacing(5)
+        weekly_frequency_row.addWidget(QLabel("重复频率"))
+        self.repeat_frequency = NoWheelComboBox()
+        for label, unit, interval in (
+            ("每天", "day", 1), ("每周", "week", 1), ("每两周", "week", 2),
+            ("每月", "month", 1), ("每年", "year", 1), ("自定义", "custom", 0),
+        ):
+            self.repeat_frequency.addItem(label, (unit, interval))
+        self.repeat_frequency.currentIndexChanged.connect(self._on_repeat_frequency_changed)
+        weekly_frequency_row.addWidget(self.repeat_frequency)
+        self.weekday_label = QLabel("星期")
+        weekly_frequency_row.addWidget(self.weekday_label)
         self.weekday = NoWheelComboBox()
         for day, label in enumerate(("周一", "周二", "周三", "周四", "周五", "周六", "周日"), 1):
             self.weekday.addItem(label, day)
-        weekly.addWidget(self.weekday)
-        self.weekly_hour = self._hour_combo()
-        self.weekly_minute = self._minute_combo()
-        weekly.addWidget(self.weekly_hour)
-        weekly.addWidget(self.weekly_minute)
-        weekly.addWidget(QLabel("提醒"))
-        weekly.addStretch()
+        weekly_frequency_row.addWidget(self.weekday)
+        weekly_frequency_row.addStretch()
+        weekly.addLayout(weekly_frequency_row)
+
+        self.custom_repeat_row = QWidget()
+        custom_repeat = QHBoxLayout(self.custom_repeat_row)
+        custom_repeat.setContentsMargins(0, 0, 0, 0)
+        custom_repeat.setSpacing(5)
+        custom_repeat.addWidget(QLabel("自定义"))
+        custom_repeat.addWidget(QLabel("每隔"))
+        self.repeat_interval = QSpinBox()
+        self.repeat_interval.setRange(1, 99)
+        self.repeat_interval.setValue(1)
+        self.repeat_interval.setFixedWidth(56)
+        self.repeat_interval.valueChanged.connect(self._on_changed)
+        custom_repeat.addWidget(self.repeat_interval)
+        self.repeat_unit = NoWheelComboBox()
+        for label, unit in (("天", "day"), ("周", "week"), ("月", "month"), ("年", "year")):
+            self.repeat_unit.addItem(label, unit)
+        self.repeat_unit.currentIndexChanged.connect(self._on_repeat_frequency_changed)
+        custom_repeat.addWidget(self.repeat_unit)
+        custom_repeat.addWidget(QLabel("提醒"))
+        custom_repeat.addStretch()
+        weekly.addWidget(self.custom_repeat_row)
         layout.addWidget(self.weekly_panel)
-        self.weekly_hint = QLabel("提醒时间独立于事项日期和事项时间；会持续提醒，直到你取消重要提醒。")
+        self.weekly_hint = QLabel("提醒时间独立于事项日期和事项时间；会按所选频率持续提醒，直到你取消重要提醒。")
         self.weekly_hint.setStyleSheet("font-size:11px; color:#718096; padding-left:4px;")
         layout.addWidget(self.weekly_hint)
 
@@ -140,6 +182,7 @@ class ImportantReminderSchedule(QFrame):
         self.weekly_start.dateChanged.connect(self._on_changed)
         self.deadline_target.dateChanged.connect(self._on_deadline_target_changed)
         self._set_offset(0, emit=False)
+        self._on_repeat_frequency_changed(emit=False)
         self._set_mode("follow", emit=False)
 
     @staticmethod
@@ -195,8 +238,35 @@ class ImportantReminderSchedule(QFrame):
         self.weekly_panel.setVisible(self._mode == "weekly")
         self.weekly_hint.setVisible(self._mode == "weekly")
         self._refresh_deadline_copy()
+        self.updateGeometry()
         if emit:
             self.changed.emit()
+
+    def _on_repeat_frequency_changed(self, *_unused, emit: bool = True) -> None:
+        unit, _interval = self.repeat_frequency.currentData() or ("week", 1)
+        custom = unit == "custom"
+        if custom:
+            unit = self.repeat_unit.currentData() or "week"
+        show_weekday = unit == "week"
+        self.weekday_label.setVisible(show_weekday)
+        self.weekday.setVisible(show_weekday)
+        self.custom_repeat_row.setVisible(custom)
+        self.weekly_panel.updateGeometry()
+        self.updateGeometry()
+        if emit and not self._loading:
+            self.changed.emit()
+
+    def _repeat_values(self) -> tuple[str, int]:
+        unit, interval = self.repeat_frequency.currentData() or ("week", 1)
+        if unit == "custom":
+            return str(self.repeat_unit.currentData() or "week"), self.repeat_interval.value()
+        return str(unit), max(1, int(interval))
+
+    def _repeat_preset_index(self, unit: str, interval: int) -> int:
+        for index in range(self.repeat_frequency.count()):
+            if self.repeat_frequency.itemData(index) == (unit, interval):
+                return index
+        return -1
 
     def _set_offset(self, minutes: int, *, emit: bool = True) -> None:
         self._offset_minutes = minutes
@@ -250,6 +320,15 @@ class ImportantReminderSchedule(QFrame):
         self.weekly_start.setDate(QDate.fromString(str(start or task["task_date"]), "yyyy-MM-dd"))
         weekday = int(task["important_reminder_weekday"] or 1) if "important_reminder_weekday" in task.keys() else 1
         self.weekday.setCurrentIndex(max(0, self.weekday.findData(weekday)))
+        repeat_unit = str(task["important_reminder_repeat_unit"] or "week") if "important_reminder_repeat_unit" in task.keys() else "week"
+        repeat_interval = max(1, int(task["important_reminder_repeat_interval"] or 1)) if "important_reminder_repeat_interval" in task.keys() else 1
+        preset_index = self._repeat_preset_index(repeat_unit, repeat_interval)
+        if preset_index >= 0:
+            self.repeat_frequency.setCurrentIndex(preset_index)
+        else:
+            self.repeat_frequency.setCurrentIndex(self._repeat_preset_index("custom", 0))
+            self.repeat_unit.setCurrentIndex(max(0, self.repeat_unit.findData(repeat_unit)))
+            self.repeat_interval.setValue(repeat_interval)
         reminder_time = task["important_reminder_time"] if "important_reminder_time" in task.keys() else None
         if reminder_time:
             hour, minute = str(reminder_time).split(":", 1)
@@ -257,6 +336,7 @@ class ImportantReminderSchedule(QFrame):
                 combo.setCurrentIndex(max(0, combo.findData(value)))
         self._loading = False
         self._refresh_deadline_copy()
+        self._on_repeat_frequency_changed(emit=False)
 
     def values(self) -> dict:
         if self._mode == "follow":
@@ -277,6 +357,9 @@ class ImportantReminderSchedule(QFrame):
             target_date = None
             weekday = int(self.weekday.currentData())
             lead_days = 0
+            repeat_unit, repeat_interval = self._repeat_values()
+        if self._mode != "weekly":
+            repeat_unit, repeat_interval = "week", 1
         return {
             "important_reminder_mode": self._mode,
             "important_reminder_offset_minutes": self._offset_minutes if self._mode == "follow" else 0,
@@ -285,6 +368,8 @@ class ImportantReminderSchedule(QFrame):
             "important_reminder_time": reminder_time,
             "important_reminder_lead_days": lead_days,
             "important_reminder_weekday": weekday,
+            "important_reminder_repeat_unit": repeat_unit,
+            "important_reminder_repeat_interval": repeat_interval,
             "important_reminder_at": None,
         }
 
@@ -295,7 +380,7 @@ class ImportantReminderEditorDialog(QDialog):
     def __init__(self, task_date: QDate, values: dict, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("重要提醒")
-        self.setMinimumWidth(470)
+        self.setMinimumWidth(600)
         self.setStyleSheet("QDialog { background:#f7f9fc; }")
         layout = QVBoxLayout(self)
         top = QHBoxLayout()
@@ -320,9 +405,15 @@ class ImportantReminderEditorDialog(QDialog):
         layout.addWidget(self.schedule)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Save)
         buttons.button(QDialogButtonBox.StandardButton.Save).setText("完成提醒设置")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        self.schedule.changed.connect(self._adjust_to_schedule)
+
+    def _adjust_to_schedule(self) -> None:
+        """Reclaim hidden mode rows before the next native-layout pass."""
+        QTimer.singleShot(0, self.adjustSize)
 
     def values(self) -> dict:
         return self.schedule.values()
