@@ -190,7 +190,9 @@ class ImportantReminderSchedule(QFrame):
         combo = NoWheelComboBox()
         for hour in TIME_HOURS:
             combo.addItem(f"{hour:02d} 时", hour)
-        combo.setFixedWidth(70)
+        # Native Windows combobox arrows and CJK glyphs need more room than
+        # macOS. Keep time fields readable rather than letting text clip.
+        combo.setFixedWidth(88)
         return combo
 
     @staticmethod
@@ -198,7 +200,7 @@ class ImportantReminderSchedule(QFrame):
         combo = NoWheelComboBox()
         for minute in TIME_MINUTES:
             combo.addItem(f"{minute:02d} 分", minute)
-        combo.setFixedWidth(70)
+        combo.setFixedWidth(88)
         return combo
 
     def set_task_date(self, value: QDate) -> None:

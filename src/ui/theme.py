@@ -33,6 +33,7 @@ APP_STYLE = """
     }
     QPushButton:hover { background:#f1f5ff; border-color:#b8c9eb; }
     QPushButton:pressed { background:#e8eef9; }
+    QPushButton:focus { outline:none; }
     QPushButton#primaryButton {
         background:#4f76e8; color:#ffffff; border:none; font-weight:600;
     }

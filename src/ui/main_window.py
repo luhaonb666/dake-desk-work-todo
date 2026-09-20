@@ -32,7 +32,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.7.0"
+APP_VERSION = "4.7.1"
 
 
 def app_icon() -> QIcon:
@@ -1201,8 +1201,10 @@ class MainWindow(QMainWindow):
             for step in self.db.task_steps(task_id)
         ])
         self.workspace_selected_task_id = copied_id
-        self.show_notice("已保留原事项并另建后续：新事项可单独继续处理。")
         self.render()
+        self.workspace_editor.show_operation_feedback(
+            "已完成“保留原事项，另建后续”操作：已新建一条后续事项。", action="duplicate"
+        )
 
     def move_workspace_task_to_today(self, task_id: int) -> None:
         task = self.db.task_by_id(task_id)
@@ -1508,6 +1510,7 @@ class MainWindow(QMainWindow):
     def move_task_to_today(self, task) -> None:
         """A single, explicit carry-forward action for the previous-work view."""
         task_id = int(task["id"])
+        from_workspace = self.workspace_selected_task_id == task_id
         today = self.db.today()
         self.db.update_task(task_id, task_date=today)
         self._skip_historical_alerts_if_needed(task_id, {
@@ -1515,10 +1518,15 @@ class MainWindow(QMainWindow):
             "windows_reminder_enabled": bool(task["windows_reminder_enabled"]),
         })
         self._sync_windows_reminders()
-        self.show_notice("已安排到今天继续处理：原事项日期已改为今天，未新建副本。")
+        if not from_workspace:
+            self.show_notice("已安排到今天继续处理：原事项日期已改为今天，未新建副本。")
         if self.workspace_selected_task_id == task_id:
             self.workspace_editor.load_task(self.db.task_by_id(task_id), self.db.task_steps(task_id))
         self.render()
+        if from_workspace:
+            self.workspace_editor.show_operation_feedback(
+                "已完成“安排到今天继续处理”操作：原事项已改为今天，未新建副本。", action="move_today"
+            )
 
     def delete_task(self, task) -> None:
         if QMessageBox.question(self, "删除事项", "确定删除这条事项吗？") == QMessageBox.StandardButton.Yes:

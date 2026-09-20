@@ -1,4 +1,4 @@
-"""Focused V4.7.0 regression checks for settings, reminders, and task views."""
+"""Focused V4.7.1 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -791,16 +791,16 @@ class V200Tests(unittest.TestCase):
         editor.load_task(self.db.task_by_id(task_id))
         self.assertEqual(editor.operations_label.text(), "继续处理方式")
         self.assertEqual(editor.move_today_button.text(), "安排到今天继续处理")
-        self.assertIn("不会新建副本", editor.move_today_hint.text())
+        self.assertIn("不会新建副本", editor.move_today_button.toolTip())
         self.assertEqual(editor.duplicate_button.text(), "保留原事项，另建后续")
-        self.assertIn("原事项会保留", editor.duplicate_hint.text())
+        self.assertIn("保留当前记录", editor.duplicate_button.toolTip())
 
     def test_v465_current_item_keeps_the_follow_up_explanation(self) -> None:
         task_id = self.db.add_task("当前项目", "", self.db.today(), None, False)
         editor = WorkspaceEditor()
         editor.load_task(self.db.task_by_id(task_id))
-        self.assertFalse(editor.duplicate_hint.isHidden())
-        self.assertIn("分项进度重新开始", editor.duplicate_hint.text())
+        self.assertTrue(editor.duplicate_hint.isHidden())
+        self.assertIn("分项步骤重新开始", editor.duplicate_button.toolTip())
         self.assertTrue(editor.move_today_button.isHidden())
 
     def test_v453_step_plus_inserts_directly_below_the_current_step(self) -> None:
@@ -855,10 +855,25 @@ class V200Tests(unittest.TestCase):
         dialog.important_schedule._set_mode("deadline")
         dialog._refresh_quick_reminder_controls()
         self.assertFalse(dialog.quick_reminder_buttons[0].isEnabled())
+        self.assertFalse(dialog.quick_reminder_buttons[0].isChecked())
         self.assertFalse(dialog.quick_reminder_custom.isEnabled())
-        self.assertIn("简单提醒不可叠加", dialog.quick_reminder_notice.text())
+        self.assertIn("简单提醒已关闭", dialog.quick_reminder_notice.text())
         self.assertEqual(dialog.important_schedule.mode_buttons["deadline"].text(), "目标日提醒")
         self.assertGreaterEqual(dialog.open_important_editor_button.minimumWidth(), 190)
+
+    def test_v471_operation_feedback_is_next_to_continuation_actions(self) -> None:
+        task_id = self.db.add_task("当前项目", "", self.db.today(), None, False)
+        editor = WorkspaceEditor()
+        editor.load_task(self.db.task_by_id(task_id))
+        editor.show_operation_feedback("已完成“保留原事项，另建后续”操作：已新建一条后续事项。")
+        self.assertFalse(editor.duplicate_feedback.isHidden())
+        self.assertIn("已完成", editor.duplicate_feedback.text())
+        self.assertFalse(editor.duplicate_button.isEnabled())
+
+    def test_v471_important_schedule_time_controls_allow_windows_padding(self) -> None:
+        dialog = TaskDialog()
+        self.assertGreaterEqual(dialog.important_schedule.weekly_hour.width(), 88)
+        self.assertGreaterEqual(dialog.important_schedule.weekly_minute.width(), 88)
 
     def test_v469_note_management_no_longer_offers_summary_folding(self) -> None:
         note = DesktopNoteDialog({"text": "第一行\n" * 9, "color": "warm_yellow", "fold_long_content": True}, True)

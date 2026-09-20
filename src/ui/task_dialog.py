@@ -241,6 +241,7 @@ class TaskDialog(QDialog):
             button.setStyleSheet(
                 "QPushButton { border:1px solid #b8cbe7; border-radius:7px; color:#476b9e; background:#fff; padding:5px 8px; font-size:11px; }"
                 "QPushButton:checked { color:#fff; background:#5d82bb; border-color:#5d82bb; }"
+                "QPushButton:disabled, QPushButton:checked:disabled { color:#98a3b2; background:#f2f4f7; border-color:#d8e0ea; }"
             )
             self.reminder_basis_group.addButton(button)
             self.reminder_basis_buttons[key] = button
@@ -304,6 +305,7 @@ class TaskDialog(QDialog):
             button.setStyleSheet(
                 "QPushButton { border:1px solid #b8cbe7; border-radius:7px; color:#476b9e; background:#fff; padding:5px 8px; font-size:11px; }"
                 "QPushButton:checked { color:#fff; background:#5d82bb; border-color:#5d82bb; }"
+                "QPushButton:disabled, QPushButton:checked:disabled { color:#98a3b2; background:#f2f4f7; border-color:#d8e0ea; }"
             )
             button.clicked.connect(lambda _checked=False, value=minutes: self._set_quick_reminder_offset(value))
             self.quick_reminder_group.addButton(button)
@@ -315,6 +317,7 @@ class TaskDialog(QDialog):
             self.quick_reminder_custom.addItem(f"提前 {hours} 小时", hours * 60)
         self.quick_reminder_custom.setStyleSheet(
             "QComboBox { border:1px solid #b8cbe7; border-radius:7px; color:#476b9e; background:#fff; padding:5px 8px; font-size:11px; }"
+            "QComboBox:disabled { color:#98a3b2; background:#f2f4f7; border-color:#d8e0ea; }"
         )
         self.quick_reminder_custom.currentIndexChanged.connect(self._set_quick_custom_reminder)
         quick_reminder_row.addWidget(self.quick_reminder_custom)
@@ -567,17 +570,19 @@ class TaskDialog(QDialog):
             if self.important_reminder_check.isChecked() and mode == "follow"
             else None
         )
+        self.quick_reminder_group.setExclusive(False)
         for minutes, button in self.quick_reminder_buttons.items():
-            button.setChecked(offset == minutes)
+            button.setChecked(not complex_plan and offset == minutes)
             button.setEnabled(not complex_plan)
+        self.quick_reminder_group.setExclusive(True)
         self.quick_reminder_custom.blockSignals(True)
-        index = self.quick_reminder_custom.findData(offset) if offset not in self.quick_reminder_buttons and offset else 0
+        index = self.quick_reminder_custom.findData(offset) if not complex_plan and offset not in self.quick_reminder_buttons and offset else 0
         self.quick_reminder_custom.setCurrentIndex(index)
         self.quick_reminder_custom.blockSignals(False)
         self.quick_reminder_custom.setEnabled(not complex_plan)
         if complex_plan:
             plan_name = "目标日提醒" if mode == "deadline" else "周期提醒"
-            self.quick_reminder_notice.setText(f"已启用{plan_name}；简单提醒不可叠加，请在“重要提醒设置”中修改。")
+            self.quick_reminder_notice.setText(f"当前仅启用{plan_name}；简单提醒已关闭，不能叠加。请在“重要提醒设置”中修改。")
         else:
             self.quick_reminder_notice.clear()
         self.quick_reminder_notice.setVisible(complex_plan)
