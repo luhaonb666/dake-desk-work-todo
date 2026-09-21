@@ -23,6 +23,9 @@ from PyQt6.QtWidgets import (
 # reminder pickers from slowly drifting into slightly different time options.
 TIME_HOURS = tuple(range(7, 23))
 TIME_MINUTES = (0, 10, 15, 20, 30, 40, 45, 50)
+# Keep every hour/minute bubble wide enough for the value, Chinese unit and
+# native drop-down arrow, regardless of which editor contains it.
+TIME_COMBO_WIDTH = 88
 
 
 def normalize_note_text(text: str) -> str:

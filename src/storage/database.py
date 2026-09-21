@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from calendar import monthrange
 from datetime import date, datetime, timedelta
@@ -10,7 +11,7 @@ from typing import Any, Iterable
 
 
 class Database:
-    SCHEMA_VERSION = 14
+    SCHEMA_VERSION = 15
 
     def __init__(self, path: Path) -> None:
         self.connection = sqlite3.connect(path)
@@ -202,6 +203,15 @@ class Database:
                 if column not in columns:
                     self.connection.execute(f"ALTER TABLE tasks ADD COLUMN {column} {definition}")
             version = 14
+        if version < 15:
+            columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(tasks)")}
+            if "important_reminder_drafts" not in columns:
+                # Keep the settings for inactive reminder modes without making
+                # them additional active schedules.
+                self.connection.execute(
+                    "ALTER TABLE tasks ADD COLUMN important_reminder_drafts TEXT NOT NULL DEFAULT '{}'"
+                )
+            version = 15
         self.connection.execute(
             "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)",
             (str(version),),
@@ -248,6 +258,7 @@ class Database:
         important_reminder_weekday: int | None = None,
         important_reminder_repeat_unit: str = "week",
         important_reminder_repeat_interval: int = 1,
+        important_reminder_drafts: str | None = None,
     ) -> int:
         now = datetime.now().isoformat(timespec="seconds")
         cursor = self.connection.execute(
@@ -258,8 +269,8 @@ class Database:
                    content_mode, event_type,
                    important_reminder_mode, important_reminder_start_date, important_reminder_target_date, important_reminder_time,
                    important_reminder_lead_days, important_reminder_weekday,
-                   important_reminder_repeat_unit, important_reminder_repeat_interval, created_at, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   important_reminder_repeat_unit, important_reminder_repeat_interval, important_reminder_drafts, created_at, updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 title, notes, task_date, due_time, int(is_fixed), int(windows_reminder_enabled),
                 max(0, int(important_reminder_offset_minutes)),
@@ -269,7 +280,8 @@ class Database:
                 self._normalize_important_reminder_mode(important_reminder_mode),
                 self._normalize_date(important_reminder_start_date), self._normalize_date(important_reminder_target_date), self._normalize_time(important_reminder_time),
                 max(0, int(important_reminder_lead_days)), self._normalize_weekday(important_reminder_weekday),
-                self._normalize_important_repeat_unit(important_reminder_repeat_unit), max(1, int(important_reminder_repeat_interval)), now, now,
+                self._normalize_important_repeat_unit(important_reminder_repeat_unit), max(1, int(important_reminder_repeat_interval)),
+                self._normalize_reminder_drafts(important_reminder_drafts), now, now,
             ),
         )
         self.connection.commit()
@@ -281,6 +293,7 @@ class Database:
             "important_reminder_offset_minutes", "important_reminder_at",
             "important_reminder_mode", "important_reminder_start_date", "important_reminder_target_date", "important_reminder_time",
             "important_reminder_lead_days", "important_reminder_weekday", "important_reminder_repeat_unit", "important_reminder_repeat_interval",
+            "important_reminder_drafts",
             "recurrence_unit", "recurrence_interval",
             "content_mode", "event_type",
         }
@@ -309,6 +322,8 @@ class Database:
             values["important_reminder_repeat_unit"] = self._normalize_important_repeat_unit(values["important_reminder_repeat_unit"])
         if "important_reminder_repeat_interval" in values:
             values["important_reminder_repeat_interval"] = max(1, int(values["important_reminder_repeat_interval"]))
+        if "important_reminder_drafts" in values:
+            values["important_reminder_drafts"] = self._normalize_reminder_drafts(values["important_reminder_drafts"])
         if "recurrence_unit" in values:
             values["recurrence_unit"] = self._normalize_recurrence_unit(values["recurrence_unit"])
         if "recurrence_interval" in values:
@@ -400,6 +415,23 @@ class Database:
         return value if value in {"day", "week", "month", "year"} else "week"
 
     @staticmethod
+    def _normalize_reminder_drafts(value: str | None) -> str:
+        if not value:
+            return "{}"
+        try:
+            parsed = json.loads(str(value)) if isinstance(value, str) else value
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return "{}"
+        if not isinstance(parsed, dict):
+            return "{}"
+        cleaned = {}
+        for mode in ("follow", "deadline", "weekly"):
+            draft = parsed.get(mode)
+            if isinstance(draft, dict):
+                cleaned[mode] = draft
+        return json.dumps(cleaned, ensure_ascii=False, sort_keys=True)
+
+    @staticmethod
     def _normalize_weekday(value: int | None) -> int | None:
         try:
             number = int(value) if value is not None else None
@@ -486,6 +518,7 @@ class Database:
             important_reminder_weekday=task["important_reminder_weekday"] if "important_reminder_weekday" in task.keys() else None,
             important_reminder_repeat_unit=task["important_reminder_repeat_unit"] if "important_reminder_repeat_unit" in task.keys() else "week",
             important_reminder_repeat_interval=int(task["important_reminder_repeat_interval"] or 1) if "important_reminder_repeat_interval" in task.keys() else 1,
+            important_reminder_drafts=task["important_reminder_drafts"] if "important_reminder_drafts" in task.keys() else None,
         )
 
     def delete_task(self, task_id: int) -> None:

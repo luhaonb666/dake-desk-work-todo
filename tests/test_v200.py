@@ -1,4 +1,4 @@
-"""Focused V4.7.0 regression checks for settings, reminders, and task views."""
+"""Focused V4.7.2 regression checks for settings, reminders, and task views."""
 
 from __future__ import annotations
 
@@ -11,15 +11,16 @@ from unittest.mock import patch
 
 from PyQt6.QtCore import QDate, QEvent, QMimeData, Qt
 from PyQt6.QtGui import QKeyEvent
-from PyQt6.QtWidgets import QApplication, QCheckBox, QLabel, QMessageBox
+from PyQt6.QtWidgets import QApplication, QCheckBox, QDialog, QDialogButtonBox, QLabel, QMessageBox
 
 from storage.database import Database
 from services.windows_notifications import planned_reminders
 from ui.main_window import ExpandableNotesWidget, ExpandableStepsPreview, FadedPreviewLine, MainWindow
 from ui.float_window import FloatCard, FloatWindow
-from ui.controls import CompactDatePicker, normalize_note_text
+from ui.controls import CompactDatePicker, TIME_COMBO_WIDTH, normalize_note_text
 from ui.desktop_note import DesktopNoteDialog, DesktopNoteWindow
 from ui.important_reminder import ImportantReminderWindow
+from ui.important_schedule import ImportantReminderEditorDialog, ImportantReminderSchedule
 from ui.settings_dialog import GuidedTimeCombo, SettingsDialog
 from ui.task_dialog import PlainNotesEditor, TaskDialog
 from ui.task_steps import TaskStepsEditor
@@ -791,16 +792,16 @@ class V200Tests(unittest.TestCase):
         editor.load_task(self.db.task_by_id(task_id))
         self.assertEqual(editor.operations_label.text(), "继续处理方式")
         self.assertEqual(editor.move_today_button.text(), "安排到今天继续处理")
-        self.assertIn("不会新建副本", editor.move_today_hint.text())
+        self.assertIn("不会新建副本", editor.move_today_button.toolTip())
         self.assertEqual(editor.duplicate_button.text(), "保留原事项，另建后续")
-        self.assertIn("原事项会保留", editor.duplicate_hint.text())
+        self.assertIn("保留当前记录", editor.duplicate_button.toolTip())
 
     def test_v465_current_item_keeps_the_follow_up_explanation(self) -> None:
         task_id = self.db.add_task("当前项目", "", self.db.today(), None, False)
         editor = WorkspaceEditor()
         editor.load_task(self.db.task_by_id(task_id))
-        self.assertFalse(editor.duplicate_hint.isHidden())
-        self.assertIn("分项进度重新开始", editor.duplicate_hint.text())
+        self.assertTrue(editor.duplicate_hint.isHidden())
+        self.assertIn("分项步骤重新开始", editor.duplicate_button.toolTip())
         self.assertTrue(editor.move_today_button.isHidden())
 
     def test_v453_step_plus_inserts_directly_below_the_current_step(self) -> None:
@@ -855,10 +856,179 @@ class V200Tests(unittest.TestCase):
         dialog.important_schedule._set_mode("deadline")
         dialog._refresh_quick_reminder_controls()
         self.assertFalse(dialog.quick_reminder_buttons[0].isEnabled())
+        self.assertFalse(dialog.quick_reminder_buttons[0].isChecked())
         self.assertFalse(dialog.quick_reminder_custom.isEnabled())
-        self.assertIn("简单提醒不可叠加", dialog.quick_reminder_notice.text())
+        self.assertIn("简单提醒已关闭", dialog.quick_reminder_notice.text())
         self.assertEqual(dialog.important_schedule.mode_buttons["deadline"].text(), "目标日提醒")
         self.assertGreaterEqual(dialog.open_important_editor_button.minimumWidth(), 190)
+
+    def test_v471_reported_reminder_editor_visual_rules(self) -> None:
+        for editor in (TaskDialog(), WorkspaceEditor()):
+            editor.time_enabled.setChecked(True)
+            editor._set_quick_reminder_offset(30)
+            editor.important_schedule._set_mode("weekly")
+            editor._refresh_quick_reminder_controls()
+            self.assertEqual(
+                {minutes: button.isChecked() for minutes, button in editor.quick_reminder_buttons.items()},
+                {0: False, 10: False, 30: False},
+            )
+            self.assertIsNone(editor.quick_reminder_custom.currentData())
+            self.assertIn("简单提醒已关闭", editor.quick_reminder_notice.text())
+            self.assertFalse(editor.quick_reminder_buttons[0].isEnabled())
+
+        dialog = TaskDialog()
+        self.assertEqual(dialog.hour_combo.width(), TIME_COMBO_WIDTH)
+        self.assertEqual(dialog.minute_combo.width(), TIME_COMBO_WIDTH)
+        self.assertEqual(dialog.important_schedule.weekly_hour.width(), TIME_COMBO_WIDTH)
+        self.assertEqual(dialog.important_schedule.weekly_minute.width(), TIME_COMBO_WIDTH)
+        self.assertTrue(dialog.important_schedule.weekly_hour.currentText().endswith("时"))
+        self.assertTrue(dialog.important_schedule.weekly_minute.currentText().endswith("分"))
+
+        editor = WorkspaceEditor()
+        task_id = self.db.add_task("当前项目", "", self.db.today(), None, False)
+        editor.load_task(self.db.task_by_id(task_id))
+        self.assertTrue(editor.duplicate_hint.isHidden())
+        self.assertTrue(editor.move_today_hint.isHidden())
+        self.assertIn("分项步骤重新开始", editor.duplicate_button.toolTip())
+        self.assertIn("不会新建副本", editor.move_today_button.toolTip())
+
+        self.assertIn("QPushButton:focus", TaskDialog().styleSheet())
+
+    def test_v472_reminder_modes_are_selectable_exclusive_and_editable_when_gray(self) -> None:
+        schedule = ImportantReminderSchedule()
+        self.assertIsNone(schedule.selected_mode())
+        schedule.mode_buttons["deadline"].click()
+        schedule.selection_button.click()
+        self.assertEqual(schedule.selected_mode(), "deadline")
+        self.assertTrue(schedule.selection_button.isChecked())
+
+        schedule.mode_buttons["weekly"].click()
+        self.assertEqual(schedule._mode, "weekly")
+        self.assertEqual(schedule.selected_mode(), "deadline")
+        self.assertTrue(schedule.weekly_panel.isEnabled())
+        self.assertAlmostEqual(schedule.weekly_panel.graphicsEffect().opacity(), 0.48)
+        schedule.weekly_hour.setCurrentIndex(schedule.weekly_hour.findData(9))
+        self.assertEqual(schedule.selected_mode(), "deadline")
+        self.assertEqual(schedule.values()["important_reminder_mode"], "deadline")
+
+        schedule.selection_button.click()
+        self.assertEqual(schedule.selected_mode(), "deadline")
+        self.assertIn("提醒方式已经被选中了", schedule.selection_notice.text())
+        schedule.mode_buttons["deadline"].click()
+        schedule.selection_button.click()
+        self.assertIsNone(schedule.selected_mode())
+        schedule.mode_buttons["weekly"].click()
+        schedule.selection_button.click()
+        self.assertEqual(schedule.selected_mode(), "weekly")
+
+        schedule.selection_button.click()
+        schedule.mode_buttons["deadline"].click()
+        schedule.selection_button.click()
+        schedule.mode_buttons["weekly"].click()
+        schedule.weekly_hour.setCurrentIndex(schedule.weekly_hour.findData(9))
+        schedule.weekly_start.setDate(QDate(2026, 9, 20))
+        values = schedule.values()
+        drafts = json.loads(values["important_reminder_drafts"])
+        self.assertEqual(drafts["weekly"]["important_reminder_time"], "09:00")
+        self.assertEqual(drafts["weekly"]["important_reminder_start_date"], "2026-09-20")
+
+        restored = ImportantReminderSchedule()
+        restored.load({"task_date": "2026-09-20", **values})
+        self.assertEqual(restored.selected_mode(), "deadline")
+        self.assertEqual(restored.weekly_hour.currentData(), 9)
+        self.assertEqual(restored.weekly_start.date().toString("yyyy-MM-dd"), "2026-09-20")
+
+        dialog = ImportantReminderEditorDialog(QDate.currentDate(), {"important_reminder_mode": "deadline"})
+        dialog.show()
+        QApplication.processEvents()
+        stable_size = dialog.size()
+        stable_schedule_size = dialog.schedule.size()
+        stable_selection_geometry = dialog.schedule.selection_button.geometry()
+        for mode in ("follow", "deadline", "weekly", "follow"):
+            dialog.schedule.mode_buttons[mode].click()
+            QApplication.processEvents()
+            self.assertEqual(dialog.size(), stable_size)
+            self.assertEqual(dialog.schedule.size(), stable_schedule_size)
+            self.assertEqual(dialog.schedule.selection_button.geometry(), stable_selection_geometry)
+        dialog.close()
+
+    def test_v472_important_reminder_dialog_requires_one_selected_mode(self) -> None:
+        dialog = ImportantReminderEditorDialog(QDate.currentDate(), {})
+        save = dialog.findChild(QDialogButtonBox).button(QDialogButtonBox.StandardButton.Save)
+        save.click()
+        self.assertEqual(dialog.result(), 0)
+        self.assertIn("右侧的“选中”", dialog.schedule.selection_notice.text())
+        dialog.schedule.mode_buttons["weekly"].click()
+        dialog.schedule.selection_button.click()
+        save.click()
+        self.assertEqual(dialog.result(), QDialog.DialogCode.Accepted)
+
+    def test_v471_operation_feedback_is_next_to_continuation_actions(self) -> None:
+        task_id = self.db.add_task("当前项目", "", self.db.today(), None, False)
+        editor = WorkspaceEditor()
+        editor.load_task(self.db.task_by_id(task_id))
+        editor.show_operation_feedback("已完成“保留原事项，另建后续”操作：已新建一条后续事项。")
+        self.assertFalse(editor.duplicate_feedback.isHidden())
+        self.assertIn("已完成", editor.duplicate_feedback.text())
+        self.assertFalse(editor.duplicate_button.isEnabled())
+        self.assertIn("操作已完成", editor.duplicate_button.toolTip())
+
+    def test_v471_copy_loads_the_new_item_and_resets_step_progress(self) -> None:
+        task_id = self.db.add_task("旧项目", "材料", "2026-09-01", "00:00", False, windows_reminder_enabled=True)
+        self.db.replace_task_steps(task_id, [{"content": "核价", "is_completed": True}])
+
+        class CopyHarness:
+            duplicate_workspace_task = MainWindow.duplicate_workspace_task
+            _skip_historical_alerts_if_needed = MainWindow._skip_historical_alerts_if_needed
+            _is_past_due = staticmethod(MainWindow._is_past_due)
+            _is_past_important_reminder = staticmethod(MainWindow._is_past_important_reminder)
+
+            def __init__(self, db: Database) -> None:
+                self.db = db
+                self.workspace_editor = WorkspaceEditor()
+                self.workspace_selected_task_id = task_id
+                self.render_count = 0
+                self.reminder_sync_count = 0
+
+            def render(self) -> None:
+                self.render_count += 1
+
+            def _sync_windows_reminders(self) -> None:
+                self.reminder_sync_count += 1
+
+        harness = CopyHarness(self.db)
+        harness.workspace_editor.load_task(self.db.task_by_id(task_id), self.db.task_steps(task_id))
+        harness.duplicate_workspace_task(task_id)
+        copied_id = harness.workspace_selected_task_id
+        self.assertNotEqual(copied_id, task_id)
+        self.assertEqual(harness.workspace_editor._task_id, copied_id)
+        self.assertEqual(harness.workspace_editor.title_edit.toPlainText(), "旧项目")
+        self.assertEqual(self.db.task_by_id(task_id)["task_date"], "2026-09-01")
+        self.assertEqual(self.db.task_by_id(copied_id)["task_date"], self.db.today())
+        self.assertIsNotNone(self.db.task_by_id(copied_id)["due_alerted_at"])
+        self.assertIsNotNone(self.db.task_by_id(copied_id)["important_acknowledged_at"])
+        self.assertFalse(self.db.task_steps(copied_id)[0]["is_completed"])
+        self.assertFalse(harness.workspace_editor.duplicate_feedback.isHidden())
+        self.assertEqual(harness.render_count, 1)
+        self.assertEqual(harness.reminder_sync_count, 1)
+
+    def test_v471_feedback_is_cleared_when_switching_items(self) -> None:
+        first_id = self.db.add_task("第一条", "", self.db.today(), None, False)
+        second_id = self.db.add_task("第二条", "", self.db.today(), None, False)
+        editor = WorkspaceEditor()
+        editor.load_task(self.db.task_by_id(first_id))
+        editor.show_operation_feedback("已新建后续事项。")
+        self.assertTrue(editor._operation_feedback_timer.isActive())
+
+        editor.load_task(self.db.task_by_id(second_id))
+        self.assertTrue(editor.duplicate_feedback.isHidden())
+        self.assertFalse(editor._operation_feedback_timer.isActive())
+        self.assertTrue(editor.duplicate_button.isEnabled())
+
+    def test_v471_important_schedule_time_controls_allow_windows_padding(self) -> None:
+        dialog = TaskDialog()
+        self.assertGreaterEqual(dialog.important_schedule.weekly_hour.width(), 88)
+        self.assertGreaterEqual(dialog.important_schedule.weekly_minute.width(), 88)
 
     def test_v469_note_management_no_longer_offers_summary_folding(self) -> None:
         note = DesktopNoteDialog({"text": "第一行\n" * 9, "color": "warm_yellow", "fold_long_content": True}, True)

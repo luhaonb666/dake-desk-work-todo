@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QDate, QTime, Qt, pyqtSignal
+from PyQt6.QtCore import QDate, QTime, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ui.controls import CompactDatePicker, NoWheelComboBox, TIME_HOURS, TIME_MINUTES, normalize_note_text
+from ui.controls import CompactDatePicker, NoWheelComboBox, TIME_COMBO_WIDTH, TIME_HOURS, TIME_MINUTES, normalize_note_text
 from ui.important_schedule import ImportantReminderEditorDialog, ImportantReminderSchedule
 from ui.task_dialog import PlainNotesEditor, TitleEditor
 from ui.task_steps import CompactStepStartButton, TaskStepsEditor
@@ -156,6 +156,8 @@ class WorkspaceEditor(QWidget):
             self.hour_combo.addItem(f"{hour:02d} 时", hour)
         for minute in TIME_MINUTES:
             self.minute_combo.addItem(f"{minute:02d} 分", minute)
+        self.hour_combo.setFixedWidth(TIME_COMBO_WIDTH)
+        self.minute_combo.setFixedWidth(TIME_COMBO_WIDTH)
         next_hour = min(22, max(7, QTime.currentTime().hour() + 1))
         self.hour_combo.setCurrentIndex(max(0, self.hour_combo.findData(next_hour)))
         self.hour_combo.activated.connect(lambda _: self.time_enabled.setChecked(True))
@@ -224,6 +226,7 @@ class WorkspaceEditor(QWidget):
             button.setStyleSheet(
                 "QPushButton { border:1px solid #b8cbe7; border-radius:7px; color:#476b9e; background:#fff; padding:5px 8px; font-size:11px; }"
                 "QPushButton:checked { color:#fff; background:#5d82bb; border-color:#5d82bb; }"
+                "QPushButton:disabled, QPushButton:checked:disabled { color:#98a3b2; background:#f2f4f7; border-color:#d8e0ea; }"
             )
             self.reminder_basis_group.addButton(button)
             self.reminder_basis_buttons[key] = button
@@ -286,6 +289,7 @@ class WorkspaceEditor(QWidget):
             button.setStyleSheet(
                 "QPushButton { border:1px solid #b8cbe7; border-radius:7px; color:#476b9e; background:#fff; padding:5px 8px; font-size:11px; }"
                 "QPushButton:checked { color:#fff; background:#5d82bb; border-color:#5d82bb; }"
+                "QPushButton:disabled, QPushButton:checked:disabled { color:#98a3b2; background:#f2f4f7; border-color:#d8e0ea; }"
             )
             button.clicked.connect(lambda _checked=False, value=minutes: self._set_quick_reminder_offset(value))
             self.quick_reminder_group.addButton(button)
@@ -297,6 +301,7 @@ class WorkspaceEditor(QWidget):
             self.quick_reminder_custom.addItem(f"提前 {hours} 小时", hours * 60)
         self.quick_reminder_custom.setStyleSheet(
             "QComboBox { border:1px solid #b8cbe7; border-radius:7px; color:#476b9e; background:#fff; padding:5px 8px; font-size:11px; }"
+            "QComboBox:disabled { color:#98a3b2; background:#f2f4f7; border-color:#d8e0ea; }"
         )
         self.quick_reminder_custom.currentIndexChanged.connect(self._set_quick_custom_reminder)
         quick_reminder_row.addWidget(self.quick_reminder_custom)
@@ -392,9 +397,12 @@ class WorkspaceEditor(QWidget):
         )
         self.duplicate_button.setToolTip("保留原事项，新建一条可继续处理的后续事项。")
         self.duplicate_button.clicked.connect(self._emit_duplicate)
-        self.duplicate_hint = QLabel("原事项会保留；新事项可继续处理，分项进度重新开始。")
-        self.duplicate_hint.setWordWrap(True)
-        self.duplicate_hint.setStyleSheet("font-size:11px; color:#7f8da0; padding:1px 5px 3px;")
+        self.duplicate_hint = QLabel()
+        self.duplicate_hint.setVisible(False)
+        self.duplicate_feedback = self._operation_feedback_label()
+        self._operation_feedback_timer = QTimer(self)
+        self._operation_feedback_timer.setSingleShot(True)
+        self._operation_feedback_timer.timeout.connect(self._clear_operation_feedback)
         self.move_today_button = QPushButton("安排到今天继续处理")
         self.move_today_button.setObjectName("continuationAction")
         self.move_today_button.setFixedHeight(34)
@@ -405,17 +413,19 @@ class WorkspaceEditor(QWidget):
         )
         self.move_today_button.setToolTip("直接把原事项改期到今天，不会新建副本。")
         self.move_today_button.clicked.connect(self._emit_move_today)
-        self.move_today_hint = QLabel("直接把原事项日期改为今天，不会新建副本。")
-        self.move_today_hint.setWordWrap(True)
-        self.move_today_hint.setStyleSheet("font-size:11px; color:#7f8da0; padding:1px 5px 3px;")
+        self.move_today_hint = QLabel()
+        self.move_today_hint.setVisible(False)
+        self.move_today_feedback = self._operation_feedback_label()
         self.cancel_important_button = QPushButton("取消重要提醒")
         self.cancel_important_button.setObjectName("continuationAction")
         self.cancel_important_button.setToolTip("停止这条重要提醒，不会完成或删除事项。")
         self.cancel_important_button.clicked.connect(self._emit_cancel_important)
         form.addWidget(self.duplicate_button)
         form.addWidget(self.duplicate_hint)
+        form.addWidget(self.duplicate_feedback)
         form.addWidget(self.move_today_button)
         form.addWidget(self.move_today_hint)
+        form.addWidget(self.move_today_feedback)
         form.addWidget(self.cancel_important_button)
         self._outer_layout.addWidget(self.form_host, 1)
 
@@ -467,7 +477,10 @@ class WorkspaceEditor(QWidget):
         self._refresh_quick_reminder_controls()
 
     def _edit_important_reminder(self) -> None:
-        dialog = ImportantReminderEditorDialog(self.date_edit.date(), self.important_schedule.values(), self)
+        schedule_values = self.important_schedule.values()
+        if not self.important_schedule.has_selection():
+            schedule_values.pop("important_reminder_mode", None)
+        dialog = ImportantReminderEditorDialog(self.date_edit.date(), schedule_values, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.important_schedule.load({
                 "task_date": self.date_edit.date().toString("yyyy-MM-dd"),
@@ -494,24 +507,26 @@ class WorkspaceEditor(QWidget):
         if not hasattr(self, "quick_reminder_buttons"):
             return
         values = self.important_schedule.values()
-        mode = values["important_reminder_mode"]
+        mode = self.important_schedule.selected_mode() or "follow"
         complex_plan = self.important_reminder_check.isChecked() and mode in {"deadline", "weekly"}
         offset = (
             values["important_reminder_offset_minutes"]
             if self.important_reminder_check.isChecked() and mode == "follow"
             else None
         )
+        self.quick_reminder_group.setExclusive(False)
         for minutes, button in self.quick_reminder_buttons.items():
-            button.setChecked(offset == minutes)
+            button.setChecked(not complex_plan and offset == minutes)
             button.setEnabled(not complex_plan)
+        self.quick_reminder_group.setExclusive(True)
         self.quick_reminder_custom.blockSignals(True)
-        index = self.quick_reminder_custom.findData(offset) if offset not in self.quick_reminder_buttons and offset else 0
+        index = self.quick_reminder_custom.findData(offset) if not complex_plan and offset not in self.quick_reminder_buttons and offset else 0
         self.quick_reminder_custom.setCurrentIndex(index)
         self.quick_reminder_custom.blockSignals(False)
         self.quick_reminder_custom.setEnabled(not complex_plan)
         if complex_plan:
             plan_name = "目标日提醒" if mode == "deadline" else "周期提醒"
-            self.quick_reminder_notice.setText(f"已启用{plan_name}；简单提醒不可叠加，请在“重要提醒设置”中修改。")
+            self.quick_reminder_notice.setText(f"当前仅启用{plan_name}；简单提醒已关闭，不能叠加。请在“重要提醒设置”中修改。")
         else:
             self.quick_reminder_notice.clear()
         self.quick_reminder_notice.setVisible(complex_plan)
@@ -618,12 +633,16 @@ class WorkspaceEditor(QWidget):
             self.set_status_message("有未保存修改", changed=True)
         else:
             self.set_status_message("已保存")
-        can_copy = self._task_id is not None and not self.is_dirty()
+        saved_copy = self._task_id is not None and not self.is_dirty()
+        can_copy = saved_copy and not self._operation_feedback_timer.isActive()
         self.duplicate_button.setEnabled(can_copy)
-        self.duplicate_hint.setText(
-            "原事项会保留；新事项可继续处理，分项进度重新开始。"
-            if can_copy else "请先保存当前修改后，再选择继续处理方式。"
-        )
+        if not saved_copy:
+            tooltip = "请先保存当前修改后，再选择继续处理方式。"
+        elif not can_copy:
+            tooltip = "操作已完成，请稍候再试。"
+        else:
+            tooltip = "保留当前记录，新建一条后续事项；分项步骤重新开始。"
+        self.duplicate_button.setToolTip(tooltip)
 
     def _on_notes_changed(self) -> None:
         self._refresh_import_button()
@@ -672,7 +691,34 @@ class WorkspaceEditor(QWidget):
         if self._task_id is not None:
             self.cancel_important_requested.emit(self._task_id)
 
+    @staticmethod
+    def _operation_feedback_label() -> QLabel:
+        label = QLabel()
+        label.setWordWrap(True)
+        label.setStyleSheet("font-size:12px; color:#356b9b; background:#eef6ff; border:1px solid #bcd4ed; border-radius:7px; padding:6px 9px;")
+        label.setVisible(False)
+        return label
+
+    def show_operation_feedback(self, text: str, *, action: str = "duplicate") -> None:
+        """Confirm a continuation action beside its button, not in the header."""
+        target = self.move_today_feedback if action == "move_today" else self.duplicate_feedback
+        self._hide_operation_feedback()
+        target.setText(text)
+        target.setVisible(True)
+        self._operation_feedback_timer.start(3500)
+        self._refresh_status()
+
+    def _hide_operation_feedback(self) -> None:
+        self._operation_feedback_timer.stop()
+        self.duplicate_feedback.setVisible(False)
+        self.move_today_feedback.setVisible(False)
+
+    def _clear_operation_feedback(self) -> None:
+        self._hide_operation_feedback()
+        self._refresh_status()
+
     def clear(self) -> None:
+        self._hide_operation_feedback()
         self._loading = True
         self._task_id = None
         self._baseline = None
@@ -692,6 +738,7 @@ class WorkspaceEditor(QWidget):
         self._choose_reminder_basis("task_time")
         self.custom_offset_combo.setCurrentIndex(0)
         self.important_schedule.set_task_date(self.date_edit.date())
+        self.important_schedule.clear_selection()
         self._schedule_touched = False
         self.recurrence_combo.setCurrentIndex(0)
         self.recurrence_interval_spin.setValue(1)
@@ -719,6 +766,7 @@ class WorkspaceEditor(QWidget):
         if task is None:
             self.clear()
             return
+        self._hide_operation_feedback()
         self._loading = True
         self._task_id = int(task["id"])
         self._task_is_previous = not bool(task["is_completed"]) and task["task_date"] < QDate.currentDate().toString("yyyy-MM-dd")
@@ -775,9 +823,9 @@ class WorkspaceEditor(QWidget):
         self.operation_divider.setVisible(True)
         self.operations_label.setVisible(True)
         self.duplicate_button.setVisible(True)
-        self.duplicate_hint.setVisible(True)
+        self.duplicate_hint.setVisible(False)
         self.move_today_button.setVisible(self._task_is_previous)
-        self.move_today_hint.setVisible(self._task_is_previous)
+        self.move_today_hint.setVisible(False)
         reminder_mode = task["important_reminder_mode"] if "important_reminder_mode" in task.keys() else "follow"
         self.cancel_important_button.setVisible(
             bool(task["windows_reminder_enabled"]) and reminder_mode in {"deadline", "weekly"}
@@ -809,6 +857,7 @@ class WorkspaceEditor(QWidget):
             "important_reminder_weekday": reminder_values["important_reminder_weekday"],
             "important_reminder_repeat_unit": reminder_values["important_reminder_repeat_unit"],
             "important_reminder_repeat_interval": reminder_values["important_reminder_repeat_interval"],
+            "important_reminder_drafts": reminder_values["important_reminder_drafts"],
             "recurrence_unit": self.recurrence_unit_combo.currentData() if self.recurrence_combo.currentData() == "custom" else self.recurrence_combo.currentData(),
             "recurrence_interval": self.recurrence_interval_spin.value() if self.recurrence_combo.currentData() == "custom" else 1,
             "steps": self.steps_editor.values(),
