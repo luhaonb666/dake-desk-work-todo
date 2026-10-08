@@ -110,3 +110,20 @@ def quarantine_task_from_last_action() -> int | None:
     except OSError:
         logging.exception("Could not save quarantined task %s", task_id)
     return task_id
+
+
+def remove_quarantined_task(task_id: int) -> None:
+    """Forget a quarantined id after the user removes the problematic item."""
+    quarantined = load_quarantined_tasks()
+    quarantined.pop(str(int(task_id)), None)
+    path = app_data_dir() / QUARANTINE_NAME
+    try:
+        if quarantined:
+            path.write_text(
+                json.dumps(quarantined, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        else:
+            path.unlink(missing_ok=True)
+    except OSError:
+        logging.exception("Could not remove quarantined task %s", task_id)

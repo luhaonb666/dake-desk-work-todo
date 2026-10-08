@@ -17,7 +17,12 @@ from PyQt6.QtWidgets import (
     QSplitter, QStackedWidget, QSystemTrayIcon, QTabBar, QVBoxLayout, QWidget,
 )
 
-from app_paths import app_data_dir, load_quarantined_tasks, record_last_action
+from app_paths import (
+    app_data_dir,
+    load_quarantined_tasks,
+    record_last_action,
+    remove_quarantined_task,
+)
 from services.windows_notifications import WindowsReminderService
 from storage.database import Database
 from ui.controls import CompactDatePicker, normalize_note_text
@@ -32,7 +37,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.7.5"
+APP_VERSION = "4.7.6"
 
 
 def app_icon() -> QIcon:
@@ -966,11 +971,62 @@ class MainWindow(QMainWindow):
         self.list_layout.addStretch(1)
 
     def _show_quarantine_notice(self) -> None:
-        count = len(self._quarantined_task_ids)
-        if count:
-            self.show_notice(
-                f"已暂时隐藏 {count} 条上次异常时正在处理的事项；数据没有删除，其余事项可正常使用。"
-            )
+        items = []
+        for task_id in sorted(self._quarantined_task_ids):
+            task = self.db.task_by_id(task_id)
+            if task is not None:
+                items.append((task_id, str(task["title"] or "未命名事项")))
+        if not items:
+            return
+        self.show_notice(
+            f"发现 {len(items)} 条上次异常时正在处理的事项，已暂时隐藏；请确认后手动删除。"
+        )
+        panel = QFrame()
+        panel.setObjectName("quarantinePanel")
+        panel.setStyleSheet(
+            "QFrame#quarantinePanel { background:#fff7e8; border:1px solid #e5c58b; border-radius:10px; }"
+            "QLabel { color:#7a5510; } QPushButton { padding:5px 10px; }"
+        )
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(12, 8, 12, 8)
+        heading = QLabel("疑似触发异常的事项（数据未删除）")
+        heading.setStyleSheet("font-weight:600; color:#8a5a1f;")
+        panel_layout.addWidget(heading)
+        for task_id, title in items:
+            row = QHBoxLayout()
+            label = QLabel(f"#{task_id}  {title}")
+            label.setTextFormat(Qt.TextFormat.PlainText)
+            label.setToolTip(title)
+            row.addWidget(label, 1)
+            delete = QPushButton("确认后删除")
+            delete.clicked.connect(lambda _=False, value=task_id: self._delete_quarantined_task(value))
+            row.addWidget(delete)
+            panel_layout.addLayout(row)
+        self.list_layout.insertWidget(0, panel)
+
+    def _delete_quarantined_task(self, task_id: int) -> None:
+        task = self.db.task_by_id(task_id)
+        if task is None:
+            remove_quarantined_task(task_id)
+            self._quarantined_task_ids.discard(task_id)
+            self.render()
+            return
+        answer = QMessageBox.question(
+            self,
+            "删除疑似异常事项",
+            f"确定删除事项“{task['title']}”吗？删除后仍可从数据库备份恢复。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.db.delete_task(task_id)
+        self.important_reminder.remove_task(task_id)
+        remove_quarantined_task(task_id)
+        self._quarantined_task_ids.discard(task_id)
+        self._quarantined_tasks.pop(str(task_id), None)
+        self._sync_windows_reminders()
+        self.render()
 
     def _visible_tasks(self, tasks):
         """Do not let one crash-associated card block the rest of the app."""

@@ -1,4 +1,4 @@
-"""DaKe Desk V4.7.5 application entry point."""
+"""DaKe Desk V4.7.6 application entry point."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from ui.main_window import MainWindow, app_icon
 from ui.theme import configure_application_font
 
 
-APP_VERSION = "4.7.5"
+APP_VERSION = "4.7.6"
 
 
 def install_exception_hook() -> None:
