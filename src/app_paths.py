@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import json
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +17,7 @@ APP_NAME = "大可桌边"
 DATA_FOLDER_NAME = "WorkTodo"
 SESSION_MARKER_NAME = "session-active"
 LAST_ACTION_NAME = "last-action.txt"
+QUARANTINE_NAME = "quarantined-tasks.json"
 
 
 def app_data_dir() -> Path:
@@ -72,3 +75,38 @@ def record_last_action(action: str) -> None:
         )
     except OSError:
         logging.exception("Could not record the last UI action")
+
+
+def load_quarantined_tasks() -> dict[str, str]:
+    """Load task ids hidden after a crash-triggering UI action."""
+    path = app_data_dir() / QUARANTINE_NAME
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def quarantine_task_from_last_action() -> int | None:
+    """Remember the task involved in the last action after an abnormal exit."""
+    marker = session_marker_path()
+    if not marker.exists():
+        return None
+    try:
+        action = (app_data_dir() / LAST_ACTION_NAME).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    match = re.search(r"(?:task|id)=(\d+)", action)
+    if not match:
+        return None
+    task_id = int(match.group(1))
+    quarantined = load_quarantined_tasks()
+    quarantined[str(task_id)] = action.strip()
+    try:
+        (app_data_dir() / QUARANTINE_NAME).write_text(
+            json.dumps(quarantined, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError:
+        logging.exception("Could not save quarantined task %s", task_id)
+    return task_id

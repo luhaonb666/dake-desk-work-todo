@@ -1,4 +1,4 @@
-"""DaKe Desk V4.7.4 application entry point."""
+"""DaKe Desk V4.7.5 application entry point."""
 
 from __future__ import annotations
 
@@ -10,13 +10,18 @@ import traceback
 from PyQt6.QtCore import QtMsgType, qInstallMessageHandler
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
-from app_paths import begin_session, configure_logging, finish_session
+from app_paths import (
+    begin_session,
+    configure_logging,
+    finish_session,
+    quarantine_task_from_last_action,
+)
 from services.hotkey import GlobalHotkey
 from ui.main_window import MainWindow, app_icon
 from ui.theme import configure_application_font
 
 
-APP_VERSION = "4.7.4"
+APP_VERSION = "4.7.5"
 
 
 def install_exception_hook() -> None:
@@ -52,19 +57,25 @@ def install_qt_message_handler() -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--background", action="store_true")
-    parser.add_argument("--safe-mode", action="store_true")
     args, _ = parser.parse_known_args()
     configure_logging()
     install_exception_hook()
     install_qt_message_handler()
     previous_crash = begin_session(APP_VERSION)
     if previous_crash:
-        logging.warning("Previous session ended unexpectedly; entering recovery mode")
+        quarantined_task_id = quarantine_task_from_last_action()
+        if quarantined_task_id is not None:
+            logging.warning(
+                "Previous session ended unexpectedly; temporarily hiding task %s",
+                quarantined_task_id,
+            )
+        else:
+            logging.warning("Previous session ended unexpectedly; starting normally")
     app = QApplication(sys.argv)
     configure_application_font(app)
     app.setWindowIcon(app_icon())
     app.setQuitOnLastWindowClosed(False)
-    window = MainWindow(recovery_mode=args.safe_mode or previous_crash)
+    window = MainWindow()
     hotkey = GlobalHotkey(window.show_editor)
     app.installNativeEventFilter(hotkey)
     window.set_hotkey_manager(hotkey)

@@ -1,4 +1,4 @@
-# 大可桌边 V4.7.4
+# 大可桌边 V4.7.5
 
 Windows 本地桌面工作待办工具。程序显示名称为“大可桌边”；数据继续保存在 Windows 的 `%LOCALAPPDATA%\WorkTodo`，以确保旧版本升级后仍能读取已有待办，不会被安装包覆盖。
 
@@ -33,9 +33,7 @@ Windows 本地桌面工作待办工具。程序显示名称为“大可桌边”
 
 ## 故障日志
 
-程序异常日志位于 `%LOCALAPPDATA%\WorkTodo\work-todo.log`。程序还会保留不含任务正文的最后操作记录 `last-action.txt`；如果上次运行没有正常结束，下次启动会先进入恢复模式，并留下 `session-active` 标记供排查。
-
-如果需要手动绕过启动时的任务渲染，可以在命令行运行 `DaKeDesk.exe --safe-mode`。恢复模式不会删除或迁移原有的 `work-todo.db`。
+程序异常日志位于 `%LOCALAPPDATA%\WorkTodo\work-todo.log`。程序还会保留不含任务正文的最后操作记录 `last-action.txt`。如果上次运行异常结束，程序仍会正常打开；若最后正在显示或操作的是某一条事项，会暂时隐藏这一条并把编号记录在 `quarantined-tasks.json`，其余事项、提醒和历史数据继续可用。该过程不会删除或迁移 `work-todo.db`。
 
 ## GitHub 自动构建
 

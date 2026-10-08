@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QSplitter, QStackedWidget, QSystemTrayIcon, QTabBar, QVBoxLayout, QWidget,
 )
 
-from app_paths import app_data_dir, record_last_action
+from app_paths import app_data_dir, load_quarantined_tasks, record_last_action
 from services.windows_notifications import WindowsReminderService
 from storage.database import Database
 from ui.controls import CompactDatePicker, normalize_note_text
@@ -32,7 +32,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.7.4"
+APP_VERSION = "4.7.5"
 
 
 def app_icon() -> QIcon:
@@ -423,13 +423,16 @@ class MainWindow(QMainWindow):
         "周末也在认真生活和工作，别忘了照顾自己。",
     ]
 
-    def __init__(self, *, recovery_mode: bool = False) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self.recovery_mode = recovery_mode
         self._render_in_progress = False
         self._float_refresh_in_progress = False
         self._completion_in_progress = False
         self.db = Database(app_data_dir() / "work-todo.db")
+        self._quarantined_tasks = load_quarantined_tasks()
+        self._quarantined_task_ids = {
+            int(task_id) for task_id in self._quarantined_tasks if str(task_id).isdigit()
+        }
         self.db.ensure_settings_table()
         self._ensure_v21_greetings()
         self._ensure_v32_greetings()
@@ -471,15 +474,13 @@ class MainWindow(QMainWindow):
         self.brand_timer.setSingleShot(True)
         self.brand_timer.timeout.connect(self._refresh_brand_at_hour)
         self._schedule_next_brand_hour()
-        if self.recovery_mode:
-            self._render_recovery_notice()
-            logging.warning("Main window started in recovery mode")
-        else:
-            self.render()
-            self._sync_windows_reminders()
-            QTimer.singleShot(250, self.restore_float)
-            QTimer.singleShot(300, self.restore_desktop_note)
-            QTimer.singleShot(1_000, self.check_reminders)
+        self.render()
+        self._sync_windows_reminders()
+        QTimer.singleShot(250, self.restore_float)
+        QTimer.singleShot(300, self.restore_desktop_note)
+        QTimer.singleShot(1_000, self.check_reminders)
+        if self._quarantined_task_ids:
+            QTimer.singleShot(0, self._show_quarantine_notice)
 
     def _ensure_v21_greetings(self) -> None:
         """Migrate built-in wording and remove the retired fourth greeting."""
@@ -952,17 +953,44 @@ class MainWindow(QMainWindow):
             if item.widget():
                 item.widget().deleteLater()
 
-    def _render_recovery_notice(self) -> None:
-        """Keep the shell available after a native crash during normal startup."""
+    def _render_error_notice(self) -> None:
+        """Keep the main window usable when a Python-level render step fails."""
         self.clear_list()
         notice = QLabel(
-            "上次运行没有正常结束，已进入恢复模式。\n"
-            "你的本地数据仍然保留；请先导出诊断信息或关闭程序，再联系支持。"
+            "事项列表暂时无法刷新，但你的本地数据没有被修改。\n"
+            "请关闭后重新打开；如仍出现问题，可提供 %LOCALAPPDATA%\\WorkTodo\\work-todo.log。"
         )
         notice.setWordWrap(True)
         notice.setStyleSheet("color:#8a5a1f; background:#fff7e8; border:1px solid #e5c58b; border-radius:10px; padding:18px;")
         self.list_layout.addWidget(notice)
         self.list_layout.addStretch(1)
+
+    def _show_quarantine_notice(self) -> None:
+        count = len(self._quarantined_task_ids)
+        if count:
+            self.show_notice(
+                f"已暂时隐藏 {count} 条上次异常时正在处理的事项；数据没有删除，其余事项可正常使用。"
+            )
+
+    def _visible_tasks(self, tasks):
+        """Do not let one crash-associated card block the rest of the app."""
+        return [task for task in tasks if int(task["id"]) not in self._quarantined_task_ids]
+
+    def _task_card(self, task, *, preview: bool = False, **kwargs) -> TaskCard:
+        """Record the exact card being created before Qt builds its controls."""
+        record_last_action(f"render-task task={int(task['id'])}")
+        return TaskCard(
+            task,
+            self.set_completed,
+            self.edit_task,
+            self.open_float_menu,
+            self.delete_task,
+            preview=preview,
+            step_summary=self._step_summary_for(task),
+            task_steps=self._steps_for(task),
+            on_cancel_important=self.cancel_important_reminder,
+            **kwargs,
+        )
 
     @staticmethod
     def _clear_layout(layout) -> None:
@@ -1025,15 +1053,15 @@ class MainWindow(QMainWindow):
 
     def _workspace_tasks(self):
         today = self.db.today()
-        pending = self.db.all_pending_tasks()
+        pending = self._visible_tasks(self.db.all_pending_tasks())
         previous = [task for task in pending if task["task_date"] < today]
-        important = [task for task in self.db.all_tasks() if bool(task["windows_reminder_enabled"])]
+        important = [task for task in self._visible_tasks(self.db.all_tasks()) if bool(task["windows_reminder_enabled"])]
         self.workspace_scope_buttons["previous"].setText(f"之前未完成（{len(previous)}）")
         self.workspace_scope_buttons["important"].setText(f"重要提醒（{len(important)}）")
         query = self.workspace_search.text().strip().casefold()
         if query:
             tasks = [
-                task for task in self.db.all_tasks()
+                task for task in self._visible_tasks(self.db.all_tasks())
                 if query in task["title"].casefold() or query in normalize_note_text(task["notes"]).casefold()
             ]
             label = f"搜索结果（{len(tasks)}）"
@@ -1041,10 +1069,10 @@ class MainWindow(QMainWindow):
             tasks = previous
             label = f"之前未完成（{len(tasks)}）"
         elif self._workspace_scope == "all":
-            tasks = self.db.all_tasks()
+            tasks = self._visible_tasks(self.db.all_tasks())
             label = "全部记录"
         elif self._workspace_scope == "fixed":
-            tasks = self.db.fixed_tasks()
+            tasks = self._visible_tasks(self.db.fixed_tasks())
             label = f"固定待办（{len(tasks)}）"
         elif self._workspace_scope == "important":
             tasks = important
@@ -1055,10 +1083,10 @@ class MainWindow(QMainWindow):
                 label = f"全部未完成（{len(tasks)}）"
             else:
                 selected_day = self.workspace_unfinished_date.date().toString("yyyy-MM-dd")
-                tasks = self.db.tasks_for(selected_day, pending_only=True)
+                tasks = self._visible_tasks(self.db.tasks_for(selected_day, pending_only=True))
                 label = f"{selected_day} · 未完成"
         else:
-            tasks = self.db.tasks_for(today)
+            tasks = self._visible_tasks(self.db.tasks_for(today))
             label = "今天事项"
         return tasks, label
 
@@ -1126,17 +1154,11 @@ class MainWindow(QMainWindow):
                 if should_group_dates and task["task_date"] != current_day:
                     current_day = task["task_date"]
                     self.workspace_list_layout.addWidget(self.section_label(current_day, 5))
-                card = TaskCard(
+                card = self._task_card(
                     task,
-                    self.set_completed,
-                    self.edit_task,
-                    self.open_float_menu,
-                    self.delete_task,
                     on_select=self.select_workspace_task,
                     selected=task["id"] == self.workspace_selected_task_id,
                     workspace_mode=True,
-                    step_summary=self._step_summary_for(task),
-                    task_steps=self._steps_for(task),
                     on_move_today=None,
                 )
                 self.workspace_list_layout.addWidget(card)
@@ -1332,10 +1354,6 @@ class MainWindow(QMainWindow):
 
     def render(self) -> None:
         """Refresh the task view once, even if a signal re-enters rendering."""
-        if self.recovery_mode:
-            logging.warning("Skipped normal task render in recovery mode")
-            record_last_action("render-skipped-recovery")
-            return
         if self._render_in_progress:
             logging.warning("Skipped re-entrant task render")
             record_last_action("render-reentry")
@@ -1346,8 +1364,8 @@ class MainWindow(QMainWindow):
             self._render_impl()
         except Exception:
             logging.exception("Task view render failed")
-            self._render_recovery_notice()
-            self.show_notice("界面刷新失败，已保留数据并进入恢复提示。")
+            self._render_error_notice()
+            self.show_notice("界面刷新失败，数据没有被修改。")
         finally:
             self._render_in_progress = False
 
@@ -1362,13 +1380,15 @@ class MainWindow(QMainWindow):
         active_tab = self.tabs.currentIndex()
         showing_all_pending = active_tab == 1 and self.all_unfinished.isChecked()
         if active_tab == 2:
-            self._render_all_tasks(self.db.all_tasks())
+            self._render_all_tasks(self._visible_tasks(self.db.all_tasks()))
             self.list_layout.addStretch(1)
             self.refresh_float()
             return
         selected_day = self.unfinished_date.date().toString("yyyy-MM-dd") if active_tab == 1 else today
-        tasks = self.db.all_pending_tasks() if showing_all_pending else self.db.tasks_for(
-            selected_day, active_tab == 1
+        tasks = self._visible_tasks(
+            self.db.all_pending_tasks() if showing_all_pending else self.db.tasks_for(
+                selected_day, active_tab == 1
+            )
         )
         if showing_all_pending:
             self._render_all_pending(tasks)
@@ -1384,7 +1404,7 @@ class MainWindow(QMainWindow):
             section_title = "今天事项" if active_tab == 0 else f"{selected_day} · 未完成"
             self.list_layout.addWidget(self.section_label(section_title))
             for task in normal:
-                self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task), task_steps=self._steps_for(task), on_cancel_important=self.cancel_important_reminder))
+                self.list_layout.addWidget(self._task_card(task))
         else:
             empty_text = "今天还没有事项。点击右上角“添加事项”开始安排。" if active_tab == 0 else "这一天没有未完成事项。"
             empty = QLabel(empty_text)
@@ -1395,11 +1415,11 @@ class MainWindow(QMainWindow):
             fixed_label.setFixedHeight(16)
             self.list_layout.addWidget(fixed_label)
             for task in fixed:
-                self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task), task_steps=self._steps_for(task), on_cancel_important=self.cancel_important_reminder))
+                self.list_layout.addWidget(self._task_card(task))
         if active_tab == 0:
             tomorrow = (now + timedelta(days=1)).date().isoformat()
             tomorrow_tasks = sorted(
-                self.db.tasks_for(tomorrow),
+                self._visible_tasks(self.db.tasks_for(tomorrow)),
                 key=lambda task: (task["due_time"] is None, task["due_time"] or "", task["created_at"]),
             )
             preview = tomorrow_tasks if self._tomorrow_preview_expanded else tomorrow_tasks[:2]
@@ -1415,9 +1435,7 @@ class MainWindow(QMainWindow):
                 preview_layout.setSpacing(7)
                 preview_layout.addWidget(self.section_label(f"明日事项（{len(tomorrow_tasks)}）", 5))
                 for task in preview:
-                    preview_layout.addWidget(
-                        TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, preview=True, step_summary=self._step_summary_for(task), task_steps=self._steps_for(task), on_cancel_important=self.cancel_important_reminder)
-                    )
+                    preview_layout.addWidget(self._task_card(task, preview=True))
                 if len(tomorrow_tasks) > 2:
                     toggle = QPushButton(
                         "↑ 收起明日事项" if self._tomorrow_preview_expanded
@@ -1446,7 +1464,7 @@ class MainWindow(QMainWindow):
             if task["task_date"] != current_date:
                 current_date = task["task_date"]
                 self.list_layout.addWidget(self.section_label(f"{current_date} · 未完成"))
-            self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task), task_steps=self._steps_for(task), on_cancel_important=self.cancel_important_reminder))
+            self.list_layout.addWidget(self._task_card(task))
 
     def _render_all_tasks(self, tasks) -> None:
         if not tasks:
@@ -1459,7 +1477,7 @@ class MainWindow(QMainWindow):
             if task["task_date"] != current_date:
                 current_date = task["task_date"]
                 self.list_layout.addWidget(self.section_label(f"{current_date} · 全部事项"))
-            self.list_layout.addWidget(TaskCard(task, self.set_completed, self.edit_task, self.open_float_menu, self.delete_task, step_summary=self._step_summary_for(task), task_steps=self._steps_for(task), on_cancel_important=self.cancel_important_reminder))
+            self.list_layout.addWidget(self._task_card(task))
 
     @staticmethod
     def _is_past_due(values: dict) -> bool:
@@ -1597,14 +1615,18 @@ class MainWindow(QMainWindow):
 
     def _sync_windows_reminders(self) -> None:
         """Use Windows notifications as an optional extra channel for important tasks."""
-        count = self.windows_reminders.sync(self.db.future_windows_reminder_tasks(datetime.now()))
+        count = self.windows_reminders.sync(
+            self._visible_tasks(self.db.future_windows_reminder_tasks(datetime.now()))
+        )
         if self.windows_reminders.error and sys.platform == "win32":
             logging.warning("Windows reminder schedule is unavailable: %s", self.windows_reminders.error)
         logging.info("Scheduled %s opt-in Windows reminder(s)", count)
 
     def _refresh_important_reminders(self, now: datetime | None = None) -> None:
         """Keep the app-owned manual-dismiss window in sync with due work."""
-        self.important_reminder.sync_tasks(self.db.pending_important_reminder_tasks(now or datetime.now()))
+        self.important_reminder.sync_tasks(
+            self._visible_tasks(self.db.pending_important_reminder_tasks(now or datetime.now()))
+        )
 
     def dismiss_important_reminder(self, task_id: int) -> None:
         """Dismiss the reminder only; the underlying task remains unfinished."""
@@ -1685,10 +1707,6 @@ class MainWindow(QMainWindow):
 
     def refresh_float(self, countdown_count: int | None = None, manual_count: int | None = None) -> None:
         """Refresh the desktop float without allowing nested refresh calls."""
-        if self.recovery_mode:
-            logging.warning("Skipped desktop float refresh in recovery mode")
-            record_last_action("float-refresh-skipped-recovery")
-            return
         if self._float_refresh_in_progress:
             logging.warning("Skipped re-entrant desktop float refresh")
             record_last_action("float-refresh-reentry")
@@ -1717,7 +1735,7 @@ class MainWindow(QMainWindow):
             self._overtime_header(now),
             auto_collapse_delay,
         )
-        scheduled = [task for task in self.db.tasks_for(self.db.today(), pending_only=True) if task["due_time"]]
+        scheduled = [task for task in self._visible_tasks(self.db.tasks_for(self.db.today(), pending_only=True)) if task["due_time"]]
         past, future = [], []
         for task in scheduled:
             due = datetime.strptime(f"{task['task_date']} {task['due_time']}", "%Y-%m-%d %H:%M")
@@ -1732,7 +1750,7 @@ class MainWindow(QMainWindow):
         # countdown positions, preserving the list order instead of competing
         # with the time-based items above it.
         untimed = [
-            task for task in self.db.tasks_for(self.db.today(), pending_only=True)
+            task for task in self._visible_tasks(self.db.tasks_for(self.db.today(), pending_only=True))
             if not task["due_time"]
         ]
         countdown = self._countdown_cards(visible, untimed, countdown_count)
@@ -1857,9 +1875,6 @@ class MainWindow(QMainWindow):
         self.show()
         self.raise_()
         self.activateWindow()
-        if self.recovery_mode:
-            logging.info("Recovery mode editor opened without normal task rendering")
-            return
         self._update_workspace_mode()
         self.render()
 
@@ -2000,7 +2015,7 @@ class MainWindow(QMainWindow):
         if self.isVisible():
             self._refresh_header(now)
         task_alerts: set[int] = set()
-        for task in self.db.tasks_needing_reminder(self.db.today()):
+        for task in self._visible_tasks(self.db.tasks_needing_reminder(self.db.today())):
             due = datetime.strptime(f"{task['task_date']} {task['due_time']}", "%Y-%m-%d %H:%M")
             seconds = (due - now).total_seconds()
             if 0 < seconds <= 600 and not task["pre_alerted_at"]:
