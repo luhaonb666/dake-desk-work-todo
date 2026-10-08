@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QSplitter, QStackedWidget, QSystemTrayIcon, QTabBar, QVBoxLayout, QWidget,
 )
 
-from app_paths import app_data_dir
+from app_paths import app_data_dir, record_last_action
 from services.windows_notifications import WindowsReminderService
 from storage.database import Database
 from ui.controls import CompactDatePicker, normalize_note_text
@@ -32,7 +32,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.7.2"
+APP_VERSION = "4.7.3"
 
 
 def app_icon() -> QIcon:
@@ -423,8 +423,12 @@ class MainWindow(QMainWindow):
         "周末也在认真生活和工作，别忘了照顾自己。",
     ]
 
-    def __init__(self) -> None:
+    def __init__(self, *, recovery_mode: bool = False) -> None:
         super().__init__()
+        self.recovery_mode = recovery_mode
+        self._render_in_progress = False
+        self._float_refresh_in_progress = False
+        self._completion_in_progress = False
         self.db = Database(app_data_dir() / "work-todo.db")
         self.db.ensure_settings_table()
         self._ensure_v21_greetings()
@@ -467,11 +471,15 @@ class MainWindow(QMainWindow):
         self.brand_timer.setSingleShot(True)
         self.brand_timer.timeout.connect(self._refresh_brand_at_hour)
         self._schedule_next_brand_hour()
-        self.render()
-        self._sync_windows_reminders()
-        QTimer.singleShot(250, self.restore_float)
-        QTimer.singleShot(300, self.restore_desktop_note)
-        QTimer.singleShot(1_000, self.check_reminders)
+        if self.recovery_mode:
+            self._render_recovery_notice()
+            logging.warning("Main window started in recovery mode")
+        else:
+            self.render()
+            self._sync_windows_reminders()
+            QTimer.singleShot(250, self.restore_float)
+            QTimer.singleShot(300, self.restore_desktop_note)
+            QTimer.singleShot(1_000, self.check_reminders)
 
     def _ensure_v21_greetings(self) -> None:
         """Migrate built-in wording and remove the retired fourth greeting."""
@@ -944,6 +952,18 @@ class MainWindow(QMainWindow):
             if item.widget():
                 item.widget().deleteLater()
 
+    def _render_recovery_notice(self) -> None:
+        """Keep the shell available after a native crash during normal startup."""
+        self.clear_list()
+        notice = QLabel(
+            "上次运行没有正常结束，已进入恢复模式。\n"
+            "你的本地数据仍然保留；请先导出诊断信息或关闭程序，再联系支持。"
+        )
+        notice.setWordWrap(True)
+        notice.setStyleSheet("color:#8a5a1f; background:#fff7e8; border:1px solid #e5c58b; border-radius:10px; padding:18px;")
+        self.list_layout.addWidget(notice)
+        self.list_layout.addStretch(1)
+
     @staticmethod
     def _clear_layout(layout) -> None:
         while layout.count():
@@ -1311,6 +1331,23 @@ class MainWindow(QMainWindow):
         self.precise_overtime.setText(self._format_precise_overtime(minutes) if minutes >= 30 else "")
 
     def render(self) -> None:
+        """Refresh the task view once, even if a signal re-enters rendering."""
+        if self._render_in_progress:
+            logging.warning("Skipped re-entrant task render")
+            record_last_action("render-reentry")
+            return
+        self._render_in_progress = True
+        record_last_action("render")
+        try:
+            self._render_impl()
+        except Exception:
+            logging.exception("Task view render failed")
+            self._render_recovery_notice()
+            self.show_notice("界面刷新失败，已保留数据并进入恢复提示。")
+        finally:
+            self._render_in_progress = False
+
+    def _render_impl(self) -> None:
         if self._workspace_active:
             self._render_workspace()
             return
@@ -1496,20 +1533,32 @@ class MainWindow(QMainWindow):
             self.render()
 
     def set_completed(self, task_id: int, completed: bool) -> None:
-        task = self.db.task_by_id(task_id)
-        was_open = task is not None and not bool(task["is_completed"])
-        self.db.set_completed(task_id, completed)
-        if completed and was_open:
-            next_id = self.db.create_next_recurrence(task_id)
-            if next_id is not None:
-                self.db.replace_task_steps(next_id, [
-                    {"content": step["content"], "is_completed": False}
-                    for step in self.db.task_steps(task_id)
-                ])
-        if completed:
-            self.important_reminder.remove_task(task_id)
-        self._sync_windows_reminders()
-        self.render()
+        if self._completion_in_progress:
+            logging.warning("Skipped re-entrant completion action for task %s", task_id)
+            record_last_action(f"set-completed-reentry task={task_id}")
+            return
+        self._completion_in_progress = True
+        record_last_action(f"set-completed task={task_id} completed={int(completed)}")
+        try:
+            task = self.db.task_by_id(task_id)
+            was_open = task is not None and not bool(task["is_completed"])
+            self.db.set_completed(task_id, completed)
+            if completed and was_open:
+                next_id = self.db.create_next_recurrence(task_id)
+                if next_id is not None:
+                    self.db.replace_task_steps(next_id, [
+                        {"content": step["content"], "is_completed": False}
+                        for step in self.db.task_steps(task_id)
+                    ])
+            if completed:
+                self.important_reminder.remove_task(task_id)
+            self._sync_windows_reminders()
+            self.render()
+        except Exception:
+            logging.exception("Completion action failed for task %s", task_id)
+            self.show_notice("完成状态更新失败，原有数据仍然保留。")
+        finally:
+            self._completion_in_progress = False
 
     def move_task_to_today(self, task) -> None:
         """A single, explicit carry-forward action for the previous-work view."""
@@ -1631,6 +1680,23 @@ class MainWindow(QMainWindow):
         return timed_cards + empty + untimed_cards
 
     def refresh_float(self, countdown_count: int | None = None, manual_count: int | None = None) -> None:
+        """Refresh the desktop float without allowing nested refresh calls."""
+        if self._float_refresh_in_progress:
+            logging.warning("Skipped re-entrant desktop float refresh")
+            record_last_action("float-refresh-reentry")
+            return
+        self._float_refresh_in_progress = True
+        record_last_action("float-refresh")
+        try:
+            self._refresh_float_impl(countdown_count, manual_count)
+        except Exception:
+            logging.exception("Desktop float refresh failed")
+            self.float_window.hide()
+            self.show_notice("桌面浮窗刷新失败，已暂时隐藏浮窗。")
+        finally:
+            self._float_refresh_in_progress = False
+
+    def _refresh_float_impl(self, countdown_count: int | None = None, manual_count: int | None = None) -> None:
         now = datetime.now()
         countdown_count = countdown_count if countdown_count is not None else int(self.db.get_setting("countdown_float_count", "3"))
         manual_count = manual_count if manual_count is not None else int(self.db.get_setting("manual_float_count", "3"))

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 
@@ -12,6 +13,8 @@ APP_NAME = "大可桌边"
 # Keep this folder name stable. Existing users already have their database under
 # %LOCALAPPDATA%\WorkTodo, so changing it would make an upgrade appear empty.
 DATA_FOLDER_NAME = "WorkTodo"
+SESSION_MARKER_NAME = "session-active"
+LAST_ACTION_NAME = "last-action.txt"
 
 
 def app_data_dir() -> Path:
@@ -34,3 +37,38 @@ def configure_logging() -> Path:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     return log_path
+
+
+def session_marker_path() -> Path:
+    """Return the marker left behind when a process exits unexpectedly."""
+    return app_data_dir() / SESSION_MARKER_NAME
+
+
+def begin_session(version: str) -> bool:
+    """Mark a running session and report whether the previous one crashed."""
+    marker = session_marker_path()
+    previous_crash = marker.exists()
+    marker.write_text(
+        f"version={version}\nstarted={datetime.now().isoformat(timespec='seconds')}\n",
+        encoding="utf-8",
+    )
+    return previous_crash
+
+
+def finish_session() -> None:
+    """Remove the marker after a normal Qt shutdown."""
+    try:
+        session_marker_path().unlink(missing_ok=True)
+    except OSError:
+        logging.exception("Could not clear the session marker")
+
+
+def record_last_action(action: str) -> None:
+    """Keep a privacy-safe description of the last UI action for crash triage."""
+    try:
+        (app_data_dir() / LAST_ACTION_NAME).write_text(
+            f"{datetime.now().isoformat(timespec='seconds')} {action}\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        logging.exception("Could not record the last UI action")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -172,6 +173,7 @@ class TaskStepsEditor(QWidget):
         super().__init__(parent)
         self._loading = False
         self._external_start_button = False
+        self._confirm_in_progress = False
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -263,17 +265,24 @@ class TaskStepsEditor(QWidget):
 
     def confirm_row(self, existing: _StepRow) -> None:
         """Enter advances to the next step, then to the body after the last."""
+        if self._confirm_in_progress:
+            logging.warning("Skipped re-entrant step confirmation")
+            return
+        self._confirm_in_progress = True
         rows = self._rows()
         try:
-            next_row = rows[rows.index(existing) + 1]
-        except (ValueError, IndexError):
-            self.next_field_requested.emit()
-            return
-        # Also update the deterministic visual state before Qt delivers the
-        # focus event.  This keeps keyboard navigation stable in both a shown
-        # window and the editor's off-screen construction path.
-        next_row._set_editing(True)
-        next_row.edit.setFocus()
+            try:
+                next_row = rows[rows.index(existing) + 1]
+            except (ValueError, IndexError):
+                self.next_field_requested.emit()
+                return
+            # Also update the deterministic visual state before Qt delivers the
+            # focus event.  This keeps keyboard navigation stable in both a shown
+            # window and the editor's off-screen construction path.
+            next_row._set_editing(True)
+            next_row.edit.setFocus()
+        finally:
+            self._confirm_in_progress = False
 
     def import_note_lines(self, text: str) -> int:
         """Append one new step for each non-empty note line, never deleting notes."""
