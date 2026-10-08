@@ -32,7 +32,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.7.3"
+APP_VERSION = "4.7.4"
 
 
 def app_icon() -> QIcon:
@@ -1332,6 +1332,10 @@ class MainWindow(QMainWindow):
 
     def render(self) -> None:
         """Refresh the task view once, even if a signal re-enters rendering."""
+        if self.recovery_mode:
+            logging.warning("Skipped normal task render in recovery mode")
+            record_last_action("render-skipped-recovery")
+            return
         if self._render_in_progress:
             logging.warning("Skipped re-entrant task render")
             record_last_action("render-reentry")
@@ -1681,6 +1685,10 @@ class MainWindow(QMainWindow):
 
     def refresh_float(self, countdown_count: int | None = None, manual_count: int | None = None) -> None:
         """Refresh the desktop float without allowing nested refresh calls."""
+        if self.recovery_mode:
+            logging.warning("Skipped desktop float refresh in recovery mode")
+            record_last_action("float-refresh-skipped-recovery")
+            return
         if self._float_refresh_in_progress:
             logging.warning("Skipped re-entrant desktop float refresh")
             record_last_action("float-refresh-reentry")
@@ -1849,6 +1857,9 @@ class MainWindow(QMainWindow):
         self.show()
         self.raise_()
         self.activateWindow()
+        if self.recovery_mode:
+            logging.info("Recovery mode editor opened without normal task rendering")
+            return
         self._update_workspace_mode()
         self.render()
 
