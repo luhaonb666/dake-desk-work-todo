@@ -37,7 +37,7 @@ from ui.workspace_editor import WorkspaceEditor
 
 
 APP_NAME = "大可桌边"
-APP_VERSION = "4.7.6"
+APP_VERSION = "4.7.7"
 
 
 def app_icon() -> QIcon:
@@ -431,6 +431,8 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self._render_in_progress = False
+        self._render_scheduled = False
+        self._workspace_render_in_progress = False
         self._float_refresh_in_progress = False
         self._completion_in_progress = False
         self.db = Database(app_data_dir() / "work-todo.db")
@@ -724,7 +726,7 @@ class MainWindow(QMainWindow):
         filter_label.setStyleSheet("font-size:12px; color:#77808c; font-weight:500;")
         unfinished_filters.addWidget(filter_label)
         self.unfinished_date = CompactDatePicker(QDate.currentDate())
-        self.unfinished_date.dateChanged.connect(lambda _: self.render())
+        self.unfinished_date.dateChanged.connect(lambda _: self.schedule_render())
         unfinished_filters.addWidget(self.unfinished_date)
         self.all_unfinished = QCheckBox("查看全部未完成")
         self.all_unfinished.toggled.connect(self.render)
@@ -808,7 +810,7 @@ class MainWindow(QMainWindow):
         self.workspace_search = QLineEdit()
         self.workspace_search.setPlaceholderText("搜索标题或说明")
         self.workspace_search.setClearButtonEnabled(True)
-        self.workspace_search.textChanged.connect(self._render_workspace)
+        self.workspace_search.textChanged.connect(lambda _: self.schedule_render())
         left_layout.addWidget(self.workspace_search)
         category_label = QLabel("日程")
         category_label.setStyleSheet("font-size:12px; color:#718096; font-weight:600; margin-top:4px;")
@@ -836,10 +838,10 @@ class MainWindow(QMainWindow):
         filter_label.setStyleSheet("font-size:11px; color:#7b8795;")
         unfinished_filters.addWidget(filter_label)
         self.workspace_unfinished_date = CompactDatePicker(QDate.currentDate())
-        self.workspace_unfinished_date.dateChanged.connect(lambda _: self._render_workspace())
+        self.workspace_unfinished_date.dateChanged.connect(lambda _: self.schedule_render())
         unfinished_filters.addWidget(self.workspace_unfinished_date)
         self.workspace_all_unfinished = QCheckBox("查看全部未完成")
-        self.workspace_all_unfinished.toggled.connect(self._render_workspace)
+        self.workspace_all_unfinished.toggled.connect(self.schedule_render)
         unfinished_filters.addWidget(self.workspace_all_unfinished)
         self.workspace_unfinished_filter_row.setVisible(False)
         left_layout.addWidget(self.workspace_unfinished_filter_row)
@@ -929,7 +931,7 @@ class MainWindow(QMainWindow):
     def on_tab_changed(self, index: int) -> None:
         is_unfinished = index == 1
         self.unfinished_filter_row.setVisible(is_unfinished)
-        self.render()
+        self.schedule_render()
 
     def _build_tray(self) -> None:
         self.tray = QSystemTrayIcon(self.windowIcon(), self)
@@ -1009,7 +1011,7 @@ class MainWindow(QMainWindow):
         if task is None:
             remove_quarantined_task(task_id)
             self._quarantined_task_ids.discard(task_id)
-            self.render()
+            self.schedule_render()
             return
         answer = QMessageBox.question(
             self,
@@ -1026,7 +1028,7 @@ class MainWindow(QMainWindow):
         self._quarantined_task_ids.discard(task_id)
         self._quarantined_tasks.pop(str(task_id), None)
         self._sync_windows_reminders()
-        self.render()
+        self.schedule_render()
 
     def _visible_tasks(self, tasks):
         """Do not let one crash-associated card block the rest of the app."""
@@ -1062,7 +1064,7 @@ class MainWindow(QMainWindow):
             button.setChecked(key == scope)
             button.blockSignals(False)
         self.workspace_unfinished_filter_row.setVisible(scope == "unfinished")
-        self._render_workspace()
+        self.schedule_render()
 
     def _workspace_should_be_active(self) -> bool:
         """Use a little hysteresis so resizing around the boundary never flickers."""
@@ -1091,9 +1093,9 @@ class MainWindow(QMainWindow):
         self.page_stack.setCurrentWidget(self.workspace_page if wanted else self.standard_page)
         if wanted:
             self.workspace_exit_button.setText("退出全屏编辑" if self.isFullScreen() else "收起编辑工作区")
-            self._render_workspace()
+            self.schedule_render()
         else:
-            self.render()
+            self.schedule_render()
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
@@ -1173,6 +1175,20 @@ class MainWindow(QMainWindow):
             card.set_selected(task_id == self.workspace_selected_task_id)
 
     def _render_workspace(self, *_unused) -> None:
+        if self._workspace_render_in_progress:
+            logging.warning("Skipped re-entrant workspace render")
+            record_last_action("workspace-render-reentry")
+            return
+        self._workspace_render_in_progress = True
+        try:
+            self._render_workspace_impl(*_unused)
+        except Exception:
+            logging.exception("Workspace render failed")
+            self.show_notice("全屏编辑刷新失败，数据没有被修改。")
+        finally:
+            self._workspace_render_in_progress = False
+
+    def _render_workspace_impl(self, *_unused) -> None:
         if not hasattr(self, "workspace_list_layout"):
             return
         now = datetime.now()
@@ -1250,7 +1266,7 @@ class MainWindow(QMainWindow):
         if current is None:
             self.workspace_selected_task_id = None
             self.workspace_editor.clear()
-            self._render_workspace()
+            self.schedule_render()
             return
         steps = values.pop("steps", [])
         self.db.update_task(task_id, **values)
@@ -1259,7 +1275,7 @@ class MainWindow(QMainWindow):
         self._sync_windows_reminders()
         updated = self.db.task_by_id(task_id)
         self.workspace_editor.mark_saved(updated, self.db.task_steps(task_id))
-        self._render_workspace()
+        self.schedule_render()
 
     def duplicate_workspace_task(self, task_id: int) -> None:
         """Copy only a saved workspace item, so the action is never ambiguous."""
@@ -1303,7 +1319,7 @@ class MainWindow(QMainWindow):
         self._sync_windows_reminders()
         self.workspace_selected_task_id = copied_id
         self.workspace_editor.load_task(self.db.task_by_id(copied_id), self.db.task_steps(copied_id))
-        self.render()
+        (self.schedule_render if hasattr(self, "schedule_render") else self.render)()
         self.workspace_editor.show_operation_feedback(
             "已完成“保留原事项，另建后续”操作：已新建一条后续事项。", action="duplicate"
         )
@@ -1425,6 +1441,17 @@ class MainWindow(QMainWindow):
         finally:
             self._render_in_progress = False
 
+    def schedule_render(self) -> None:
+        """Queue one render after the current Qt event has unwound."""
+        if self._render_scheduled:
+            return
+        self._render_scheduled = True
+        QTimer.singleShot(0, self._run_scheduled_render)
+
+    def _run_scheduled_render(self) -> None:
+        self._render_scheduled = False
+        self.render()
+
     def _render_impl(self) -> None:
         if self._workspace_active:
             self._render_workspace()
@@ -1507,7 +1534,7 @@ class MainWindow(QMainWindow):
 
     def _toggle_tomorrow_preview(self) -> None:
         self._tomorrow_preview_expanded = not self._tomorrow_preview_expanded
-        self.render()
+        self.schedule_render()
 
     def _render_all_pending(self, tasks) -> None:
         if not tasks:
@@ -1583,7 +1610,7 @@ class MainWindow(QMainWindow):
             self.db.replace_task_steps(task_id, steps)
             self._skip_historical_alerts_if_needed(task_id, values)
             self._sync_windows_reminders()
-            self.render()
+            self.schedule_render()
 
     def edit_task(self, task) -> None:
         dialog = TaskDialog(task, self, task_steps=self.db.task_steps(int(task["id"])))
@@ -1608,7 +1635,7 @@ class MainWindow(QMainWindow):
                 and not self.workspace_editor.is_dirty()
             ):
                 self.workspace_editor.mark_saved(self.db.task_by_id(task_id), self.db.task_steps(task_id))
-            self.render()
+            self.schedule_render()
 
     def set_completed(self, task_id: int, completed: bool) -> None:
         if self._completion_in_progress:
@@ -1631,7 +1658,7 @@ class MainWindow(QMainWindow):
             if completed:
                 self.important_reminder.remove_task(task_id)
             self._sync_windows_reminders()
-            self.render()
+            self.schedule_render()
         except Exception:
             logging.exception("Completion action failed for task %s", task_id)
             self.show_notice("完成状态更新失败，原有数据仍然保留。")
@@ -1653,7 +1680,7 @@ class MainWindow(QMainWindow):
             self.show_notice("已安排到今天继续处理：原事项日期已改为今天，未新建副本。")
         if self.workspace_selected_task_id == task_id:
             self.workspace_editor.load_task(self.db.task_by_id(task_id), self.db.task_steps(task_id))
-        self.render()
+        self.schedule_render()
         if from_workspace:
             self.workspace_editor.show_operation_feedback(
                 "已完成“安排到今天继续处理”操作：原事项已改为今天，未新建副本。", action="move_today"
@@ -1667,7 +1694,7 @@ class MainWindow(QMainWindow):
                 self.workspace_selected_task_id = None
                 self.workspace_editor.clear()
             self._sync_windows_reminders()
-            self.render()
+            self.schedule_render()
 
     def _sync_windows_reminders(self) -> None:
         """Use Windows notifications as an optional extra channel for important tasks."""
@@ -1695,7 +1722,7 @@ class MainWindow(QMainWindow):
         self.db.cancel_important_reminder(task_id)
         self.important_reminder.remove_task(task_id)
         self._sync_windows_reminders()
-        self.render()
+        self.schedule_render()
 
     def snooze_important_reminder(self, task_id: int, minutes: int) -> None:
         """Delay the persistent app reminder without touching the task schedule."""
@@ -1932,7 +1959,7 @@ class MainWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
         self._update_workspace_mode()
-        self.render()
+        self.schedule_render()
 
     def toggle_fullscreen(self) -> None:
         if self.isFullScreen():
@@ -1957,7 +1984,7 @@ class MainWindow(QMainWindow):
         self.page_stack.setCurrentWidget(self.standard_page)
         if self.isFullScreen():
             self.showNormal()
-        self.render()
+        self.schedule_render()
         QTimer.singleShot(0, self._finish_workspace_exit)
 
     def _confirm_discard_workspace(self, text: str) -> bool:
@@ -2099,7 +2126,7 @@ class MainWindow(QMainWindow):
     def finish_float_alert(self) -> None:
         self.alert_task_ids.clear()
         self.refresh_float()
-        self.render()
+        self.schedule_render()
 
     def _run_passive_float_dialog(self, dialog: QDialog) -> QDialog.DialogCode:
         """Keep the main page modal while the separate desktop float observes.
@@ -2164,9 +2191,9 @@ class MainWindow(QMainWindow):
                 self.hotkey_manager.unregister()
             elif values["shortcut"] != "none" and not self.apply_shortcut(values["shortcut"]):
                 self.show_notice("Alt + E 未能启用，可能正被其他软件占用。")
-            self.render()
+            self.schedule_render()
         else:
-            self.render()
+            self.schedule_render()
 
     def set_autostart(self, enabled: bool) -> None:
         if sys.platform != "win32" or not getattr(sys, "frozen", False):

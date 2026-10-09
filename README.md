@@ -1,4 +1,4 @@
-# 大可桌边 V4.7.6
+# 大可桌边 V4.7.7
 
 Windows 本地桌面工作待办工具。程序显示名称为“大可桌边”；数据继续保存在 Windows 的 `%LOCALAPPDATA%\WorkTodo`，以确保旧版本升级后仍能读取已有待办，不会被安装包覆盖。
 
@@ -24,6 +24,8 @@ Windows 本地桌面工作待办工具。程序显示名称为“大可桌边”
 
 首次验收时，先双击 `scripts\verify_windows.bat`，它会启动源码版并在关闭后保留错误文字。通过后再双击 `scripts\build_windows.bat`。构建脚本自动建立自己的 Python 虚拟环境、安装依赖并打包。
 
+构建依赖已固定为 PyQt6 6.10.2，避免不同电脑或不同日期安装到不同的 Qt6Gui.dll。这个版本是当前回归测试使用的 Qt 组合；不要在打包前执行无约束的 `pip install --upgrade PyQt6`。
+
 复制项目到 Windows 时不必复制 Mac 上的 `.venv` 文件夹；Windows 脚本会单独创建 `.venv-windows`。
 
 - 首次如未安装 Inno Setup，会先生成 `dist\DaKeDesk.exe`。
@@ -33,7 +35,7 @@ Windows 本地桌面工作待办工具。程序显示名称为“大可桌边”
 
 ## 故障日志
 
-程序异常日志位于 `%LOCALAPPDATA%\WorkTodo\work-todo.log`。程序还会保留不含任务正文的最后操作记录 `last-action.txt`。如果上次运行异常结束，程序仍会正常打开；若最后正在显示或操作的是某一条事项，主页会列出该事项的编号和标题，并暂时隐藏它。用户确认后可以直接删除该事项；在确认前，程序不会删除任何数据。其余事项、提醒和历史数据继续可用。该过程不会删除或迁移 `work-todo.db`。
+程序异常日志位于 `%LOCALAPPDATA%\WorkTodo\work-todo.log`。程序还会保留不含任务正文的最后操作记录 `last-action.txt`，并记录实际使用的 Python、PyQt 和 Qt 版本。如果上次运行异常结束，程序仍会正常打开；若最后正在显示或操作的是某一条事项，主页会列出该事项的编号和标题，并暂时隐藏它。用户确认后可以直接删除该事项；在确认前，程序不会删除任何数据。其余事项、提醒和历史数据继续可用。该过程不会删除或迁移 `work-todo.db`。
 
 ## GitHub 自动构建
 

@@ -1,4 +1,4 @@
-"""DaKe Desk V4.7.6 application entry point."""
+"""DaKe Desk V4.7.7 application entry point."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import logging
 import sys
 import traceback
 
-from PyQt6.QtCore import QtMsgType, qInstallMessageHandler
+from PyQt6.QtCore import PYQT_VERSION_STR, QT_VERSION_STR, QtMsgType, qInstallMessageHandler
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from app_paths import (
@@ -21,7 +21,7 @@ from ui.main_window import MainWindow, app_icon
 from ui.theme import configure_application_font
 
 
-APP_VERSION = "4.7.6"
+APP_VERSION = "4.7.7"
 
 
 def install_exception_hook() -> None:
@@ -61,6 +61,14 @@ def main() -> int:
     configure_logging()
     install_exception_hook()
     install_qt_message_handler()
+    logging.info(
+        "Starting DaKeDesk %s; Python=%s; PyQt=%s; Qt=%s; frozen=%s",
+        APP_VERSION,
+        sys.version.split()[0],
+        PYQT_VERSION_STR,
+        QT_VERSION_STR,
+        bool(getattr(sys, "frozen", False)),
+    )
     previous_crash = begin_session(APP_VERSION)
     if previous_crash:
         quarantined_task_id = quarantine_task_from_last_action()
